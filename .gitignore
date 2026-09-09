@@ -1,0 +1,29 @@
+__pycache__/
+*.py[cod]
+.venv/
+.env
+*.egg-info/
+dist/
+build/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+.ipynb_checkpoints/
+
+# Datos de mercado: pesados y licenciados por el proveedor. No versionar.
+data/raw/**
+data/processed/**
+data/synthetic/**
+!data/**/.gitkeep
+
+# Salidas de backtest
+reports/**
+!reports/.gitkeep
+
+# Salida generada del explorador: se rehace entera con
+# `chronos chart explorer`. La fuente son los assets de
+# src/chronos/infrastructure/reporting/assets/, que sí se versionan.
+now/**
+!now/.gitkeep

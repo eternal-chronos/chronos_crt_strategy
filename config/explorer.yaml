@@ -1,0 +1,125 @@
+# Explorador de velas — los cuatro pares del proyecto.
+#
+# Aquí NO hay ni un parámetro de estrategia, y es a propósito: este fichero
+# declara de dónde salen las velas y cómo se dibujan, nada de qué se decide.
+# Cuando exista una estrategia, su configuración va en su propio fichero.
+#
+# Los cuatro históricos viajan DENTRO del mismo HTML: cambiar de par en el
+# explorador no abre otro fichero, cambia de qué velas se leen.
+#
+# Los pares sin histórico descargado NO rompen la corrida: se avisa de cuáles
+# faltan y se dibujan los que hay. Para bajarlos:
+#
+#   chronos data dukascopy -g m1 -s XAUUSD,EURUSD,GBPUSD,USDJPY \
+#     --from 2018-01-01 --to 2025-12-31 --sides bid
+#
+# Tiene que ser M1: la verificación de zona horaria mide el rango medio POR
+# MINUTO del día, y con velas de una hora el pico sólo puede caer en horas en
+# punto, así que no distingue las 13:30 de las 13:00.
+
+# Lado del precio con el que se dibuja todo el proyecto: bid | ask | mid.
+# `mid` y `ask` exigen tener descargado también el lado ask.
+price_side: bid
+
+# Gráficos del explorador, de mayor a menor. El primero es el que abre.
+# Un par cuyo histórico no dé para alguna de ellas se dibuja igual con las que sí
+# pueda: se avisa de cuál falta y por qué.
+timeframes: [D, H4, H1, M15]
+
+# --- Los pares --------------------------------------------------------------
+#
+# `decimals` es con cuántas cifras se DIBUJA el precio, y de ahí sale el pip con
+# el que se miden las distancias a mano: la última cifra que se enseña. No tiene
+# nada que ver con los decimales con los que Dukascopy codifica el fichero
+# crudo, que son cosa del descargador.
+symbols:
+  - symbol: XAUUSD
+    label: XAUUSD (oro)
+    bid_path: data/processed/XAUUSD_M1_bid.parquet
+    ask_path: ""
+    timezone: UTC
+    start: null
+    end: null
+    decimals: 2
+
+  - symbol: EURUSD
+    label: EURUSD
+    bid_path: data/processed/EURUSD_M1_bid.parquet
+    ask_path: ""
+    timezone: UTC
+    start: null
+    end: null
+    decimals: 5
+
+  - symbol: GBPUSD
+    label: GBPUSD
+    bid_path: data/processed/GBPUSD_M1_bid.parquet
+    ask_path: ""
+    timezone: UTC
+    start: null
+    end: null
+    decimals: 5
+
+  - symbol: USDJPY
+    label: USDJPY
+    bid_path: data/processed/USDJPY_M1_bid.parquet
+    ask_path: ""
+    timezone: UTC
+    start: null
+    end: null
+    decimals: 3
+
+# --- Agregación -------------------------------------------------------------
+#
+# Las velas dependen ÍNTEGRAMENTE de estos dos valores: cambiarlos cambia lo que
+# se ve. `NY_17:00` es la rejilla de cTrader/Pepperstone, con el horario de
+# verano de Nueva York resuelto de verdad año por año. Con ancla de sesión, H4
+# arranca con la sesión y `h4_offset_hours` no pinta nada.
+#
+# La rejilla de M15 y H1 —cuartos de hora y horas en punto— es la misma en todas
+# las plataformas y no lleva parámetro que ajustar.
+aggregation:
+  h4_offset_hours: 0
+  d_session_start: NY_17:00
+
+# --- Marcas a mano ----------------------------------------------------------
+#
+# Los nombres con los que el propietario marca encima del precio. Son ETIQUETAS
+# DE DIBUJO: no las lee ningún cálculo, no salen del HTML y no hay ninguna regla
+# detrás. Se declaran aquí —y no en el JavaScript— para que renombrarlas cuando
+# la estrategia tenga vocabulario propio no exija tocar el explorador.
+#
+# Tres de cada como mucho: hay tres colores de mano, elegidos para no
+# confundirse con ninguna capa calculada el día que la haya.
+marks:
+  rects: [Zona 1, Zona 2, Zona 3]
+  lines: [Nivel 1, Nivel 2, Nivel 3]
+
+# --- Verificación de zona horaria -------------------------------------------
+#
+# Obligatoria antes de dibujar. Un offset equivocado no da error: da velas H4 y
+# diarias desplazadas, o sea un gráfico distinto al de la plataforma.
+timezone_audit:
+  enabled: true
+  expected_peak_utc: "13:30"
+  tolerance_minutes: 30
+  weekend_gap_hours: 12.0
+  min_conformity: 0.9
+
+# --- Salida -----------------------------------------------------------------
+reporting:
+  output_dir: now/explorador
+  # Zona de la sesión del propietario; el explorador imprime las dos horas.
+  session_timezone: Etc/GMT+4
+  # Velas embebidas POR PAR y POR TEMPORALIDAD; se conservan las más recientes.
+  # 0 = todas. Es el tamaño del fichero: cuatro pares por cuatro temporalidades
+  # multiplican lo que en un explorador de un solo símbolo era una cifra cómoda.
+  #
+  # TODAS, y es por el REPLAY. La vela en curso se arma con la temporalidad
+  # inmediatamente inferior —el diario con H4, H4 con H1, H1 con M15—, así que
+  # recortar las finas no quita detalle: quita el armado entero. Con el tope en
+  # 40.000, M15 empezaba en 2024-04 y H1 en 2019-03, y antes de esas fechas cada
+  # paso del replay cerraba la vela de golpe en vez de irla haciendo. El
+  # explorador sólo dibuja el tramo de la ventana, así que el coste de traerlas
+  # todas es de descarga del HTML, no de dibujo.
+  max_explorer_bars: 0

@@ -1,0 +1,76 @@
+# Perfil de humo: mismo motor y mismos costes, sobre datos SINTÉTICOS.
+# Sirve para verificar que el pipeline funciona, nunca para juzgar una estrategia.
+# Configuración de una corrida de backtest.
+# Perfil activo del proyecto: BACKTEST (no demo, no live).
+
+mode: backtest
+
+account:
+  initial_balance: 10000.0
+  currency: USD
+  # Apalancamiento efectivo de la cuenta; el margen del símbolo puede ser menor.
+  leverage: 200
+  # Si el equity cae por debajo de este % del margen usado, se liquida (stop out).
+  stop_out_level: 0.5
+  margin_call_level: 1.0
+
+instrument: xauusd # -> config/instruments/xauusd.yaml
+
+data:
+  source: parquet # apunta al histórico sintético generado por `chronos data synth`
+  path: data/synthetic/XAUUSD_M1.parquet
+  timeframe: M1 # timeframe base del dataset
+  # Timeframe sobre el que corre la estrategia; si difiere del base se resamplea.
+  strategy_timeframe: M15
+  start: null # ISO 8601 o null para todo el histórico
+  end: null
+  # Zona horaria en la que se interpretan/exponen las marcas de tiempo.
+  timezone: UTC
+
+execution:
+  # Cómo se ejecuta una señal generada al cierre de la barra N:
+  #   next_bar_open  -> apertura de la barra N+1 (realista, sin lookahead)
+  #   current_close  -> cierre de la barra N (optimista, solo para depurar)
+  fill_model: next_bar_open
+  # Si una barra toca SL y TP a la vez, cuál se asume primero.
+  # "worst" = siempre el stop loss (conservador).
+  intrabar_priority: worst
+  # Aplicar spread a la ejecución (compra en ask, venta en bid).
+  apply_spread: true
+  apply_commission: true
+  apply_swap: true
+  apply_slippage: true
+
+risk:
+  # fixed_lot | fixed_fractional | fixed_cash_risk
+  sizing: fixed_fractional
+  risk_per_trade: 0.005 # 0.5% del equity por operación (requiere SL definido)
+  fixed_lot: 0.10 # usado solo si sizing = fixed_lot
+  max_lot: 5.0
+  max_concurrent_positions: 1
+  max_daily_loss: 0.03 # 3% del balance inicial del día -> corta el día
+  max_drawdown_stop: 0.25 # 25% de DD -> detiene el backtest
+
+# NOTA: `ema_cross` es la estrategia de REFERENCIA que viene con el motor, no la
+# del proyecto. Está aquí para que el pipeline se pueda correr de punta a punta
+# —datos -> motor -> informe— antes de que exista una estrategia propia. Cuando
+# la haya, se cambia el nombre de abajo; cuando sobre, se borra
+# `src/chronos/domain/strategies/ema_cross.py` y esta sección con ella.
+strategy:
+  name: ema_cross # registrado en chronos.domain.strategies
+  params:
+    fast_period: 20
+    slow_period: 50
+    atr_period: 14
+    sl_atr_mult: 2.0
+    tp_atr_mult: 3.0
+
+reporting:
+  output_dir: reports
+  save_trades_csv: true
+  save_equity_csv: true
+  html_report: true
+  # Barras a dibujar en el gráfico de precio (0 = todas; cuidado con datasets grandes)
+  max_price_bars: 20000
+
+random_seed: 42

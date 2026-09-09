@@ -1,0 +1,60 @@
+# Especificación del símbolo XAUUSD tal como lo publica Pepperstone en cTrader.
+#
+# IMPORTANTE: estos valores son el punto de partida y DEBEN verificarse contra la
+# ficha del símbolo en tu cuenta real (cTrader > clic derecho en el símbolo >
+# "Symbol Information"), porque cambian por entidad regulatoria y tipo de cuenta.
+# Todo el motor lee de aquí: no hay números mágicos en el código.
+
+symbol: XAUUSD
+description: Gold vs US Dollar (CFD)
+
+# --- Cotización ---
+digits: 2 # decimales del precio
+tick_size: 0.01 # mínimo incremento de precio
+pip_size: 0.01 # cTrader define pip = 0.01 para XAUUSD (pipPosition = 2)
+contract_size: 100 # onzas por lote
+# valor de un tick por lote = contract_size * tick_size = 1.00 USD
+
+# --- Divisas ---
+base_currency: XAU
+quote_currency: USD
+profit_currency: USD # coincide con la divisa de cuenta -> sin conversión FX
+
+# --- Volumen ---
+min_lot: 0.01
+max_lot: 100.0
+lot_step: 0.01
+
+# --- Margen ---
+leverage: 200 # 1:200 típico en metales; verificar en tu cuenta
+
+# --- Costes de transacción (cuenta Razor) ---
+costs:
+  # Modelo de spread: "fixed" usa spread_points; "from_data" usa la columna
+  # spread/ask del dataset si existe.
+  spread_mode: fixed
+  spread_points: 20 # 20 ticks * 0.01 = 0.20 USD de spread
+  # Comisión por lote y por lado. Pepperstone NO cobra comisión en metales en
+  # muchas entidades; ponerlo a 0.0 si tu cuenta no la aplica. VERIFICAR.
+  commission_per_lot_per_side: 3.0
+  # Slippage en ticks aplicado en contra en órdenes a mercado y stops.
+  slippage_points: 1
+
+# --- Swap / financiación nocturna ---
+# Puntos (ticks) cargados por lote y por noche. Negativo = coste.
+swap:
+  mode: points # points | percent_annual
+  long_points: -8.0
+  short_points: 3.0
+  triple_swap_weekday: 2 # 0=lunes ... 4=viernes. Miércoles = triple para metales
+  rollover_hour_server: 0 # hora del servidor a la que se aplica el swap
+
+# --- Sesión de negociación (hora del servidor cTrader, ver timezone abajo) ---
+# El oro cotiza casi 24h con un corte diario de 1h.
+session:
+  timezone: Europe/Athens # servidor cTrader Pepperstone = EET/EEST (UTC+2/+3)
+  daily_break:
+    start: "00:00"
+    end: "01:00"
+  week_open: { weekday: 6, time: "01:05" } # domingo
+  week_close: { weekday: 4, time: "23:55" } # viernes

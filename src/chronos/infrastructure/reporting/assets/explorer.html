@@ -1,0 +1,317 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>__TITLE__</title>
+<style>
+:root {
+  color-scheme: light;
+  --surface: #fcfcfb;
+  --page: #f9f9f7;
+  --ink: #0b0b0b;
+  --secondary: #52514e;
+  --muted: #898781;
+  --grid: #e1e0d9;
+  --font: system-ui, -apple-system, "Segoe UI", sans-serif;
+}
+* { box-sizing: border-box; }
+body {
+  margin: 0; padding: 24px 20px 56px;
+  background: var(--page); color: var(--ink); font-family: var(--font);
+}
+.wrap { max-width: 1400px; margin: 0 auto; }
+h1 { font-size: 20px; margin: 0 0 4px; }
+.subtitle { color: var(--muted); font-size: 13px; }
+.controls {
+  display: flex; flex-wrap: wrap; gap: 22px; align-items: flex-end;
+  background: var(--surface); border: 1px solid var(--grid); border-radius: 10px;
+  padding: 12px 16px; margin: 18px 0;
+}
+.group { display: flex; flex-direction: column; gap: 6px; }
+.group > span {
+  font-size: 11px; text-transform: uppercase; letter-spacing: .07em; color: var(--secondary);
+}
+.buttons { display: flex; gap: 0; }
+.buttons button {
+  font: inherit; font-size: 13px; padding: 6px 14px; cursor: pointer;
+  background: var(--page); color: var(--secondary);
+  border: 1px solid var(--grid); border-right-width: 0;
+}
+.buttons button:first-child { border-radius: 6px 0 0 6px; }
+.buttons button:last-child { border-radius: 0 6px 6px 0; border-right-width: 1px; }
+.buttons button[aria-pressed="true"] { background: var(--ink); color: var(--surface); border-color: var(--ink); }
+label.toggle { display: flex; align-items: center; gap: 7px; font-size: 13px; color: var(--secondary); }
+input[type="date"], input[type="number"], select {
+  font: inherit; font-size: 13px; padding: 5px 8px; color: var(--ink);
+  background: var(--page); border: 1px solid var(--grid); border-radius: 6px;
+}
+.buttons button[disabled] { opacity: .45; cursor: default; }
+#sim-rr {
+  font-size: 13px; padding: 6px 10px; white-space: nowrap;
+  background: var(--page); color: var(--muted);
+  border: 1px solid var(--grid); border-radius: 6px;
+}
+#sim-rr[data-source="auto"] {
+  color: var(--ink); border-color: var(--ink); font-weight: 600;
+}
+input[disabled], select[disabled] { opacity: .45; }
+#symbol-group > span { color: var(--ink); font-weight: 600; }
+#replay-group.on > span { color: var(--ink); font-weight: 600; }
+#chart { background: var(--surface); border: 1px solid var(--grid); border-radius: 10px; }
+.legend {
+  display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px;
+  font-size: 12px; color: var(--secondary);
+}
+.legend i { display: inline-block; width: 22px; height: 3px; margin-right: 6px; vertical-align: middle; }
+.legend .box { height: 12px; opacity: .18; }
+footer { margin-top: 26px; font-size: 12px; color: var(--muted); }
+footer code { background: var(--surface); border: 1px solid var(--grid); border-radius: 4px; padding: 1px 5px; }
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1>__HEADER__</h1>
+    <p class="subtitle">__SUBTITLE__</p>
+  </header>
+
+  <div class="controls">
+    <div class="group" id="symbol-group">
+      <span title="El par que se está mirando. Los históricos de todos viajan dentro de
+este mismo fichero: cambiar de par no abre nada, cambia de qué velas se leen.
+Cada par lleva SUS decimales —el pip de EURUSD no es el de XAUUSD— y SUS marcas
+a mano: lo que dibujes en uno se guarda y vuelve cuando regreses a él.
+El encuadre manual se suelta al cambiar, porque el rango de precios de un par no
+encuadra el de otro. La ventana de fechas y la cuenta simulada no se tocan.
+Atajos de teclado: flechas ARRIBA y ABAJO.">Par</span>
+      <div class="buttons" id="symbol-buttons"></div>
+    </div>
+    <div class="group">
+      <span title="Atajos de teclado: d = Diario, 4 = H4, 1 = H1, m = M15.
+Se ignoran mientras el foco está en un campo de texto.">Temporalidad</span>
+      <div class="buttons" id="tf-buttons"></div>
+    </div>
+    <div class="group">
+      <span>Vista</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <div class="buttons" id="view-buttons">
+          <button type="button" data-view="candles">Velas</button>
+          <button type="button" data-view="line">Líneas (cierres)</button>
+        </div>
+        <div class="buttons">
+          <button type="button" id="zoom-reset" title="Suelta el zoom hecho a mano y vuelve al
+encuadre automático. También con doble clic sobre el gráfico.">Ajustar</button>
+        </div>
+      </div>
+    </div>
+    <div class="group">
+      <span>Periodo</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="preset-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="prev" title="Ventana anterior (flecha izquierda)">◀</button>
+          <button type="button" id="next" title="Ventana siguiente (flecha derecha)">▶</button>
+        </div>
+      </div>
+    </div>
+    <div class="group">
+      <span>Fechas (UTC)</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="date" id="from" aria-label="Desde">
+        <span style="color:var(--muted)">→</span>
+        <input type="date" id="to" aria-label="Hasta">
+      </div>
+    </div>
+
+    <div class="group" id="replay-group">
+      <span title="Reproduce la historia paso a paso desde la fecha elegida. Cada paso
+descubre una vela más —o un trozo más de la que se está formando— y a la derecha
+no se dibuja nada posterior al reloj.
+La barra espaciadora arranca y para; las flechas dan un paso adelante y atrás.
+El reloj se conserva al cambiar de temporalidad Y al cambiar de par.">Replay</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <input type="date" id="replay-date" aria-label="Fecha de arranque del replay">
+        <div class="buttons">
+          <button type="button" id="replay-start" title="Arranca el replay en esa fecha">Empezar</button>
+          <button type="button" id="replay-back" title="Un paso atrás (flecha izquierda)">◀◀</button>
+          <button type="button" id="replay-step" title="Un paso adelante (flecha derecha)">▶▶</button>
+          <button type="button" id="replay-play"
+            title="Reproducción automática (barra espaciadora)">▶</button>
+          <button type="button" id="replay-exit" title="Sale del replay y vuelve al periodo anterior">Salir</button>
+        </div>
+        <label class="toggle" title="Arma la vela en curso con las velas de la temporalidad
+inferior que ya han cerrado. Va HUECA: todavía no ha cerrado.">
+          <input type="checkbox" id="replay-forming" checked> Vela en formación</label>
+        <label class="toggle">Velocidad
+          <select id="replay-speed" aria-label="Velocidad del replay">
+            <option value="1400">lenta</option>
+            <option value="700" selected>normal</option>
+            <option value="300">rápida</option>
+            <option value="80">muy rápida</option>
+          </select>
+        </label>
+        <label class="toggle">Velas a la vista
+          <input type="number" id="replay-window" value="180" min="20" max="2000" step="20"
+            style="width:88px" aria-label="Velas a la vista durante el replay">
+        </label>
+      </div>
+    </div>
+
+    <div class="group" id="sim-group">
+      <span title="Dibuja a mano una entrada encima del precio: el rectángulo del OBJETIVO
+pegado por encima de la entrada y el del RIESGO por debajo, al revés en corto.
+El botón ARMA y el clic siguiente sobre el gráfico la PLANTA. Después se
+arrastra: el borde exterior de cada caja mueve el objetivo o el stop, la línea de
+la entrada mueve el conjunto, los bordes de los lados alargan el tramo y el
+interior lo desplaza todo. Escape desarma.
+El R:R NO SE ELIGE: se mide entre el stop y el objetivo que hay puestos, y se
+vuelve a medir en cuanto arrastras cualquiera de los dos.
+ES DIBUJO: no hay orden, ni ejecución, ni resultado. Nadie mira si el precio
+llegó al objetivo o al stop.">Simular entrada</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="sim-buttons"></div>
+        <span id="sim-rr" title="El R:R que hay dibujado.">R:R —</span>
+        <div class="buttons">
+          <button type="button" id="sim-clear" title="Quita la caja dibujada">Quitar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" id="rect-group">
+      <span title="RECUADROS que plantas tú encima del precio para señalar lo que ves.
+No los ha calculado nadie: en el proyecto todavía no hay ninguna regla, y
+mientras no la haya esto es lo único que marca una zona. Van PUNTEADOS, con un
+color por nombre, y se numeran por nombre.
+El botón ARMA y el clic siguiente PLANTA; después se arrastra por los bordes o
+por dentro. Escape desarma. Los nombres salen de la configuración: cámbialos ahí
+cuando la estrategia tenga vocabulario propio.">Recuadros a mano</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="rect-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="rect-undo" title="Quita el último recuadro plantado">Deshacer</button>
+          <button type="button" id="rect-clear" title="Quita todos los recuadros">Limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" id="line-group">
+      <span title="LÍNEAS que trazas tú encima del precio: por dónde pasa un nivel, qué dos
+puntos une, de dónde a dónde miras. Tampoco las calcula nadie.
+Nacen HORIZONTALES al precio pulsado y se inclinan arrastrando un extremo; por
+dentro se mueven enteras. Lo que las separa de un recuadro es el TRAZO: continuo
+la línea, punteado el recuadro.
+El botón ARMA y el clic siguiente PLANTA. Escape desarma.">Líneas a mano</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <div class="buttons" id="line-buttons"></div>
+        <div class="buttons">
+          <button type="button" id="line-undo" title="Quita la última línea trazada">Deshacer</button>
+          <button type="button" id="line-clear" title="Quita todas las líneas">Limpiar</button>
+        </div>
+      </div>
+    </div>
+
+    <div class="group" id="account-group">
+      <span title="Una cuenta de mentira para juzgar una racha. La caja que hay dibujada se
+apunta como GANADA, PERDIDA o BREAK-EVEN y el saldo se mueve: ganar suma el
+riesgo por el R:R de la caja, perder resta el riesgo entero.
+El riesgo NO COMPONE: el porcentaje es del capital escrito en la casilla, así que
+la apuesta es la misma en todas las operaciones. Para subirla, sube el capital.
+De cada operación se guarda su MÚLTIPLO DE RIESGO, no los euros: cambiar el
+capital o el riesgo reescala la curva entera.
+Es UNA cuenta para los cuatro pares, y cada operación dice sobre cuál se dibujó.
+NO ES DINERO: los resultados los apuntas tú mirando el gráfico.">Cuenta simulada</span>
+      <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
+        <label class="toggle">Capital
+          <input type="number" id="account-initial" min="1" step="10" style="width:92px"
+            aria-label="Capital de partida">
+        </label>
+        <label class="toggle">Riesgo
+          <select id="account-mode" aria-label="Cómo se mide el riesgo"></select>
+          <input type="number" id="account-risk" min="0.01" step="0.5" style="width:82px"
+            aria-label="Riesgo por operación">
+        </label>
+        <div class="buttons" id="account-buttons"
+          title="Apunta la caja dibujada con ese resultado"></div>
+        <div class="buttons">
+          <button type="button" id="account-undo" title="Deshace la última operación apuntada y devuelve su caja">Deshacer</button>
+          <button type="button" id="account-reset" title="Borra todas las operaciones apuntadas">Reiniciar</button>
+          <button type="button" id="account-copy" title="Copia el historial en texto plano al portapapeles">Copiar</button>
+        </div>
+        <strong id="account-summary" style="font-size:13px; font-variant-numeric:tabular-nums;"
+          title="Saldo, riesgo de la siguiente operación y cuántas llevas apuntadas."></strong>
+      </div>
+    </div>
+
+    <div class="group">
+      <span title="Abre una ventana al azar dentro del periodo que estás mirando para que
+marques lo que veas ANTES de nada. La semilla se enseña: la misma semilla reabre
+la misma ventana, así que la prueba se puede volver a discutir después.">Auditoría ciega</span>
+      <div style="display:flex; gap:8px; align-items:center;">
+        <input type="number" id="blind-seed" placeholder="semilla" aria-label="Semilla"
+          style="width:110px">
+        <div class="buttons">
+          <button type="button" id="blind-start" title="Sortea una ventana dentro del periodo actual">Empezar</button>
+          <button type="button" id="blind-reveal" title="Revela lo que hubiera dibujado el motor">Revelar</button>
+          <button type="button" id="blind-exit" title="Sale de la auditoría ciega">Salir</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="chart"></div>
+
+  <div class="legend">
+    <span><i style="background:#1baf7a"></i>vela alcista
+      <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
+      por debajo de la apertura, sin ninguna otra lectura detrás</span>
+    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay estructura, ni zonas,
+      ni señales, ni entradas calculadas: todavía no existe nada que las calcule. Lo único
+      que se ve encima del precio lo pone tu mano, y el estado de abajo lo dice en cada
+      dibujo.</span>
+    <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
+      viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
+      el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra
+      el del otro</span>
+    <span>vela hueca a la derecha = vela en formación durante el replay: todavía no ha
+      cerrado. Se arma con las velas de la temporalidad inferior que ya cerraron dentro de
+      ella</span>
+    <span>arrastrando sobre el <b>EJE DE PRECIOS</b> se comprime o se estira la vertical, y
+      sobre el <b>EJE DE FECHAS</b> se abre o se cierra el gráfico de lado, anclado en la
+      última vela</span>
+    <span>el zoom hecho a mano (rueda o arrastre) se conserva paso a paso durante el replay;
+      «Ajustar» o el doble clic lo sueltan</span>
+    <span>teclas <b>d</b> (Diario), <b>4</b> (H4), <b>1</b> (H1) y <b>m</b> (M15) cambian de
+      gráfico; <b>↑</b> y <b>↓</b> cambian de par; <b>←</b> y <b>→</b> mueven la ventana (o
+      dan pasos en replay); la <b>barra espaciadora</b> arranca y para el replay</span>
+    <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
+      <i class="box" style="background:#d03b3b; opacity:.22"></i><b>Entrada simulada</b>: la
+      caja verde es el objetivo y la roja el riesgo, colgando de la línea de la entrada. La
+      plantas tú con un clic y la arrastras. No hay orden, ni ejecución, ni resultado: nadie
+      mira si el precio llegó</span>
+    <span>el <b>R:R es automático</b>: no se elige, se mide. Arrastrar el stop o el objetivo
+      lo vuelve a medir, porque lo que ha cambiado es la caja. Un pip es la última cifra del
+      precio <i>de ese par</i></span>
+    <span>los <b>recuadros a mano</b> van punteados y las <b>líneas a mano</b> continuas, cada
+      nombre con su color —los tres tonos de la mano, elegidos para no confundirse con
+      ninguna capa calculada el día que la haya—. Se numeran por nombre y no salen de la
+      pantalla</span>
+    <span>con la <b>cuenta simulada</b> cada caja lleva además el dinero que se juega: lo que
+      resta si toca el stop y lo que suma si llega al objetivo, con el capital y el riesgo que
+      haya puestos</span>
+  </div>
+
+  <footer>
+    <p id="notes"></p>
+    <p>
+      Generado el <code>__GENERATED__</code> · fichero autocontenido: los datos, Plotly y la
+      lógica van dentro y funciona sin conexión.
+    </p>
+  </footer>
+</div>
+
+<script id="explorer-data" type="application/json">__DATA__</script>
+<script>__PLOTLY__</script>
+<script>__EXPLORER_JS__</script>
+</body>
+</html>

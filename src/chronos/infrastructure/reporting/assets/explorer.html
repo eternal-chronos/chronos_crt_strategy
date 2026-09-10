@@ -69,19 +69,26 @@ input[disabled], select[disabled] { opacity: .45; }
 }
 #crt-bias { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
 #crt-bias-note { font-size: 12px; color: var(--muted); }
-#crt-table-wrap { margin-top: 22px; }
-#crt-table-caption { font-size: 12px; color: var(--secondary); margin: 0 0 8px; }
-#crt-table { max-height: 340px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px; }
-#crt-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
-#crt-table th, #crt-table td {
+/* El estado del ENFOQUE, al lado del sesgo y con el mismo peso: las dos
+   preguntas —hacia dónde y cuándo— se leen juntas o no se leen. */
+#h4-state { font-size: 17px; font-weight: 600; font-variant-numeric: tabular-nums; }
+#crt-table-wrap, #h4-table-wrap { margin-top: 22px; }
+#crt-table-caption, #h4-table-caption {
+  font-size: 12px; color: var(--secondary); margin: 0 0 8px;
+}
+#crt-table, #h4-table {
+  max-height: 340px; overflow: auto; border: 1px solid var(--grid); border-radius: 8px;
+}
+#crt-table table, #h4-table table { border-collapse: collapse; width: 100%; font-size: 12px; }
+#crt-table th, #crt-table td, #h4-table th, #h4-table td {
   text-align: left; padding: 5px 10px; border-bottom: 1px solid var(--grid);
   white-space: nowrap; font-variant-numeric: tabular-nums;
 }
-#crt-table th {
+#crt-table th, #h4-table th {
   position: sticky; top: 0; background: var(--surface); color: var(--secondary);
   font-weight: 600; text-transform: uppercase; font-size: 10px; letter-spacing: .06em;
 }
-#crt-table td.empty { color: var(--muted); white-space: normal; }
+#crt-table td.empty, #h4-table td.empty { color: var(--muted); white-space: normal; }
 .legend {
   display: flex; flex-wrap: wrap; gap: 18px; margin-top: 14px;
   font-size: 12px; color: var(--secondary);
@@ -190,7 +197,9 @@ Se dibujan SÓLO sobre el gráfico Diario, que es donde se detectan. El sesgo y 
 tabla se ven en las cuatro temporalidades, porque el sesgo diario manda mires lo
 que mires.
 Durante el replay un rango no aparece hasta que su vela de confirmación ha
-CERRADO, y su estado se actualiza vela a vela.">Rangos CRT (motor)</span>
+CERRADO, y su estado se actualiza vela a vela.
+En el gráfico de H4 se dibujan además los rangos CRT de H4, el rango diario que
+da el sesgo —en azul, de contexto— y el FONDO por estado de alineación.">Rangos CRT (motor)</span>
       <div style="display:flex; gap:8px; align-items:center; flex-wrap:wrap;">
         <label class="toggle" title="Con esto quitado se ven sólo los rangos vivos: se
 ocultan los completados, los fallidos y los expirados, en el gráfico y en la tabla.">
@@ -303,6 +312,12 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
     <strong id="crt-bias" title="El sesgo del último rango diario vivo: hacia dónde va el
 precio mientras ese rango no se complete ni se invalide. Sale del motor, no de
 ninguna marca a mano."></strong>
+    <strong id="h4-state" title="El ENFOQUE: si el rango H4 que manda va en la misma
+dirección que el sesgo diario o al revés. ALINEADO = el sistema busca a favor del
+sesgo; EN CONTRA = bloqueado hasta que ese rango se complete, falle o aparezca
+uno nuevo a favor; TARGET DEFINIDO = hay sesgo pero todavía ningún rango H4
+vivo; SIN TARGET = no hay ni sesgo.
+Se reevalúa al CIERRE de cada vela H4: la que se está formando no lo cambia."></strong>
     <span id="crt-bias-note"></span>
   </div>
 
@@ -313,14 +328,20 @@ ninguna marca a mano."></strong>
     <div id="crt-table"></div>
   </div>
 
+  <div id="h4-table-wrap">
+    <p id="h4-table-caption"></p>
+    <div id="h4-table"></div>
+  </div>
+
   <div class="legend">
     <span><i style="background:#1baf7a"></i>vela alcista
       <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
       por debajo de la apertura, sin ninguna otra lectura detrás</span>
-    <span><b>LO QUE CALCULA EL MOTOR SON LOS RANGOS CRT DIARIOS, y nada más.</b> No hay
-      señales, ni entradas, ni gestión: sólo la detección del rango y su ciclo de vida. Todo
-      lo demás que se ve encima del precio lo pone tu mano, y el estado de abajo separa
-      siempre las dos cosas.</span>
+    <span><b>LO QUE CALCULA EL MOTOR SON LOS RANGOS CRT DIARIOS, LOS DE H4 Y LA ALINEACIÓN
+      ENTRE LOS DOS, y nada más.</b> No hay señales, ni entradas, ni gestión: sólo la
+      detección del rango, su ciclo de vida y el cruce de las dos temporalidades. Todo lo
+      demás que se ve encima del precio lo pone tu mano, y el estado de abajo separa siempre
+      las dos cosas.</span>
     <span><i class="box" style="background:#1baf7a; opacity:.22"></i>
       <i class="box" style="background:#d03b3b; opacity:.22"></i><b>Rango CRT</b>: el
       rectángulo va del mínimo al máximo de la vela de REFERENCIA, empieza en ella y llega
@@ -331,9 +352,37 @@ ninguna marca a mano."></strong>
       le sacó a la de referencia, que es también la invalidación del rango</span>
     <span>los rangos se dibujan <b>sólo sobre el gráfico Diario</b>, que es donde se
       detectan; el <b>sesgo</b> y la <b>tabla</b> se ven en las cuatro temporalidades</span>
+    <span>las tablas separan las dos marcas de la vela que confirma: <b>abre</b> es su
+      etiqueta —donde se dibuja, porque las velas se etiquetan al inicio de su intervalo— y
+      <b>cierra</b> es el instante en que el rango <b>existe</b>. Todo lo que pregunta desde
+      cuándo se sabe un rango —el replay, el sesgo y la alineación— usa el cierre. En H4 las
+      dos van además con la hora de Nueva York, que es el reloj con el que se nombran sus
+      velas</span>
     <span>en replay un rango <b>no aparece hasta que su vela de confirmación ha cerrado</b>,
       y pasa a completado o fallido en la vela que lo resuelve, no antes: de la vela en
-      formación no se marca nada</span>
+      formación no se marca nada. Con el <b>estado de alineación</b> pasa lo mismo: se
+      reevalúa al cerrar cada vela H4, y la que se está formando no lo mueve</span>
+    <span><b>EL ENFOQUE DE H4.</b> El sesgo diario dice hacia dónde va el precio; H4 dice
+      cuándo va enfocado hacia ahí. Sobre el gráfico de <b>H4</b> se dibujan los rangos CRT
+      de H4 —mismo verde, mismo rojo, mismo trazo— y, en <b>azul</b>, el <b>contexto
+      diario</b>: las dos líneas del rango que da el sesgo y su objetivo con la etiqueta
+      <b>TP D1</b>. Los rangos H4 llevan su propia línea de objetivo, <b>TP H4</b></span>
+    <span>el <b>FONDO del gráfico de H4</b> dice en qué estado estaba el sistema en cada
+      tramo: <i class="box" style="background:#eda100; opacity:.22"></i><b>TARGET
+      DEFINIDO</b> (hay sesgo diario y todavía ningún rango H4 vivo),
+      <i class="box" style="background:#1baf7a; opacity:.22"></i><b>ALINEADO</b> (el rango
+      H4 que manda va a favor: el sistema busca),
+      <i class="box" style="background:#d03b3b; opacity:.22"></i><b>EN CONTRA</b>
+      (bloqueado hasta que ese rango se complete, falle o aparezca uno a favor), y
+      <b>sin color</b> cuando no hay sesgo: ahí no hay nada que señalar</span>
+    <span>la etiqueta <b>CRT H4 nº dirección</b> va <b>fuera del rectángulo</b> —encima del
+      techo si el rango es alcista, debajo del suelo si es bajista—: los rectángulos de H4
+      son pequeños y con el texto dentro no se veían las velas</span>
+    <span>los rangos H4 que el <b>filtro horario</b> deja fuera se dibujan en <b>gris</b>:
+      se detectan igual, pero no cuentan para alinear. Hoy el filtro está apagado</span>
+    <span>sobre el gráfico <b>Diario</b>, el <b>cuadradito bajo cada vela</b> es el estado
+      H4 en que quedó ese día —el de su última vela H4 cerrada—, con los mismos colores:
+      sirve para recorrer varios días seguidos sin abrir H4 uno a uno</span>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra

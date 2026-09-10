@@ -60,6 +60,7 @@ function declare(id) {
  'prev', 'next', 'from', 'to',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
  'crt-group', 'crt-resolved', 'crt-bias', 'crt-bias-note', 'crt-table', 'crt-table-caption',
+ 'h4-state', 'h4-table-wrap', 'h4-table', 'h4-table-caption',
  'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
  'line-group', 'line-buttons', 'line-undo', 'line-clear',
@@ -158,9 +159,21 @@ function handDrawn(shape) {
 }
 
 /* Lo que dibuja el MOTOR: los rangos CRT. Va aparte de lo de la mano a
- * propósito, porque de eso depende cómo se lee el gráfico. */
+ * propósito, porque de eso depende cómo se lee el gráfico.
+ *
+ * Son dos capas y se leen por separado: los rangos de la temporalidad del sesgo
+ * (`crt-…`) y todo lo del ENFOQUE de H4 (`crt-h4-…`), que son los rangos H4, el
+ * contexto diario en azul y el fondo por estado. */
+function h4Shape(shape) {
+  return String(shape.name || '').indexOf('crt-h4-') === 0;
+}
+
 function crtShape(shape) {
-  return String(shape.name || '').indexOf('crt-') === 0;
+  return String(shape.name || '').indexOf('crt-') === 0 && !h4Shape(shape);
+}
+
+function engineDrawn(shape) {
+  return crtShape(shape) || h4Shape(shape);
 }
 
 /* El punto más a la derecha de todo lo que NO ha dibujado una mano —velas y
@@ -174,6 +187,23 @@ function furthest(traces, layout) {
     if (!handDrawn(shape)) { points.push(shape.x1); }
   });
   return points.length ? points.sort()[points.length - 1] : null;
+}
+
+function engineShape(shape) {
+  return {
+    name: shape.name, type: shape.type,
+    x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+    xref: shape.xref || null, yref: shape.yref || null,
+    color: (shape.line && shape.line.color) || null,
+    dash: (shape.line && shape.line.dash) || null,
+    fillcolor: shape.fillcolor || null,
+    label: (shape.label && shape.label.text) || null,
+    // Dónde cae el texto respecto del borde: `textposition` lo pega a un lado y
+    // `yanchor` decide si queda dentro o fuera del rectángulo.
+    textposition: (shape.label && shape.label.textposition) || null,
+    yanchor: (shape.label && shape.label.yanchor) || null,
+    layer: shape.layer || null,
+  };
 }
 
 const relayoutCalls = [];
@@ -210,19 +240,10 @@ global.Plotly = {
       // Todo lo que hay en `shapes` lo ha puesto una mano o es un rango CRT: si
       // aparece ahí cualquier otra cosa, este recuento deja de ser cero.
       shapes: (layout.shapes || []).filter(function (shape) {
-        return !handDrawn(shape) && !crtShape(shape);
+        return !handDrawn(shape) && !engineDrawn(shape);
       }).length,
-      crt: (layout.shapes || []).filter(crtShape).map(function (shape) {
-        return {
-          name: shape.name, type: shape.type,
-          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
-          color: (shape.line && shape.line.color) || null,
-          dash: (shape.line && shape.line.dash) || null,
-          fillcolor: shape.fillcolor || null,
-          label: (shape.label && shape.label.text) || null,
-          layer: shape.layer || null,
-        };
-      }),
+      crt: (layout.shapes || []).filter(crtShape).map(engineShape),
+      h4: (layout.shapes || []).filter(h4Shape).map(engineShape),
       sim: (layout.shapes || []).filter(simShape).map(function (shape) {
         return {
           name: shape.name, type: shape.type,
@@ -268,19 +289,23 @@ function collect(node, tag, out) {
   return out;
 }
 
-function crtTableRows() {
-  return collect(elements['crt-table'], 'TR', []).map(function (row) {
+function tableRows(id) {
+  return collect(elements[id], 'TR', []).map(function (row) {
     return (row.children || []).map(function (cell) { return cell.textContent; });
   });
 }
 
+function crtTableRows() { return tableRows('crt-table'); }
+
 /* Lo más a la derecha que llega un rango dibujado. En replay no puede pasar del
  * reloj: sería enseñar antes de tiempo algo que el motor todavía no sabía. */
-function crtFurthest() {
-  const shapes = (plotCalls[plotCalls.length - 1] || {}).crt || [];
+function furthestOf(kind) {
+  const shapes = (plotCalls[plotCalls.length - 1] || {})[kind] || [];
   const edges = shapes.map(function (shape) { return shape.x1; }).sort();
   return edges.length ? edges[edges.length - 1] : null;
 }
+
+function crtFurthest() { return furthestOf('crt'); }
 
 function pressed(container, key) {
   const found = elements[container].children.filter(function (button) {
@@ -319,6 +344,11 @@ function snapshot(label) {
     crtCaption: elements['crt-table-caption'].textContent,
     crtRows: crtTableRows(),
     crtMaxX: crtFurthest(),
+    h4State: elements['h4-state'].textContent,
+    h4Caption: elements['h4-table-caption'].textContent,
+    h4Rows: tableRows('h4-table'),
+    h4TableHidden: elements['h4-table-wrap'].style.display === 'none',
+    h4MaxX: furthestOf('h4'),
     crtResolvedChecked: elements['crt-resolved'].checked === true,
     crtResolvedDisabled: elements['crt-resolved'].disabled === true,
     lineArmed: pressed('line-buttons', 'kind'),
@@ -446,8 +476,13 @@ elements['crt-resolved'].fire('change', { target: { checked: false } });
 steps.push(snapshot('crt-sin-resueltos'));
 elements['crt-resolved'].fire('change', { target: { checked: true } });
 
-// En otra temporalidad no se dibuja ningún rango; el sesgo y la tabla siguen.
-selectChart(payload.symbols[0].charts[1]);
+// En una temporalidad sin capa calculada no se dibuja nada encima del precio;
+// el sesgo y la tabla siguen. Se elige la primera que no sea ni la del sesgo ni
+// la del enfoque: en ésas SÍ hay cosas dibujadas, y a propósito.
+const sinCapa = payload.symbols[0].charts.filter(function (tf) {
+  return tf !== crtTf && tf !== payload.h4.timeframe;
+})[0];
+selectChart(sinCapa);
 steps.push(snapshot('crt-en-otra-temporalidad'));
 selectChart(crtTf);
 
@@ -461,6 +496,33 @@ elements['replay-step'].fire('click');
 elements['replay-step'].fire('click');
 steps.push(snapshot('crt-replay-paso'));
 elements['replay-exit'].fire('click');
+
+// --- El ENFOQUE de H4: la segunda capa calculada ------------------------------
+//
+// Sobre H4 conviven tres cosas del motor: los rangos H4, el contexto diario en
+// azul y el fondo por estado. El estado se reevalúa al CERRAR cada vela H4, así
+// que en replay no puede adelantarse al reloj.
+const enfoqueTf = payload.h4.timeframe;
+selectChart(enfoqueTf);
+presets[0].fire('click');
+steps.push(snapshot('h4-en-su-temporalidad'));
+
+// Sobre el diario no se dibuja nada de H4 salvo la marca de estado del día, y
+// el panel sigue diciendo en qué estado está el sistema.
+selectChart(crtTf);
+steps.push(snapshot('h4-en-el-diario'));
+
+selectChart(enfoqueTf);
+const h4Serie = payload.symbols[0].bars[enfoqueTf].t;
+elements['replay-date'].value = new Date(h4Serie[Math.floor(h4Serie.length / 2)] * 60000)
+  .toISOString().slice(0, 10);
+elements['replay-start'].fire('click');
+steps.push(snapshot('h4-replay-inicio'));
+elements['replay-step'].fire('click');
+elements['replay-step'].fire('click');
+steps.push(snapshot('h4-replay-paso'));
+elements['replay-exit'].fire('click');
+selectChart(crtTf);
 
 // --- Replay -------------------------------------------------------------------
 const h4 = payload.symbols[0].charts.indexOf('H4') >= 0 ? 'H4' : payload.symbols[0].charts[0];
@@ -839,6 +901,17 @@ elements['blind-seed'].fire('change', {});
 elements['blind-start'].fire('click');
 steps.push(snapshot('ciega-repetida'));
 elements['blind-exit'].fire('click');
+
+// La venda tapa las DOS capas calculadas, no sólo la del sesgo.
+selectChart(enfoqueTf);
+elements['blind-seed'].value = '4242';
+elements['blind-seed'].fire('change', {});
+elements['blind-start'].fire('click');
+steps.push(snapshot('ciega-en-h4'));
+elements['blind-reveal'].fire('click');
+steps.push(snapshot('ciega-en-h4-revelada'));
+elements['blind-exit'].fire('click');
+selectChart(crtTf);
 
 console.log(JSON.stringify({
   unknownElements: missing,

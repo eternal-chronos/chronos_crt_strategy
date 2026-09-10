@@ -1,8 +1,8 @@
 """CLI del explorador de velas.
 
 Punto de composición: aquí se juntan configuración, carga de bid/ask,
-verificación de zona horaria, agregación M1 → M15/H1/H4/D, la capa de rangos
-CRT y el HTML.
+verificación de zona horaria, agregación M1 → M15/H1/H4/D, las capas CRT
+—rangos diarios, rangos H4 y la alineación entre los dos— y el HTML.
 
 Este módulo no detecta nada: la regla vive en `domain/crt` y se compone en
 `interface/crt_layer`. Aquí sólo se llama, se imprime y se le pasa al dibujo lo
@@ -22,6 +22,7 @@ from rich.table import Table
 
 from chronos.application.chart.config import TIMEFRAME_LABELS, ExplorerConfig
 from chronos.application.chart.timezone_audit import TimezoneAudit, audit_timezone
+from chronos.domain.crt.alignment import MODES, STATES
 from chronos.domain.errors import DomainError
 from chronos.infrastructure.config.loader import ConfigError, load_explorer_config
 from chronos.infrastructure.market.chart_run import ChartRun, SymbolBars, build_chart_run
@@ -33,9 +34,14 @@ from chronos.infrastructure.reporting.explorer import (
     render_explorer,
 )
 from chronos.interface.crt_layer import (
+    DEFAULT_ALIGNMENT,
     DEFAULT_PARAMS,
+    FOCUS_TIMEFRAME,
     RANGE_TIMEFRAME,
     SymbolRanges,
+    alignment_layer,
+    alignment_summary,
+    alignment_waiting,
     build_ranges,
     range_layer,
 )
@@ -132,13 +138,15 @@ def explorer(
         _audit_or_stop(run, run_config, skip_tz_audit)
 
         layer = range_layer(ranges)
+        focus = alignment_layer(ranges)
         destination = out or (Path(run_config.reporting.output_dir) / EXPLORER_FILE)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        html = render_explorer(run, ranges=layer)
+        html = render_explorer(run, ranges=layer, alignment=focus)
         destination.write_text(html, encoding="utf-8")
 
-        payload = build_payload(run, ranges=layer)
+        payload = build_payload(run, ranges=layer, alignment=focus)
         _print_ranges(ranges)
+        _print_alignment(ranges)
         console.print(
             f"\n[green]OK[/green] explorador → {destination}\n"
             f"[dim]{len(html) / 1_048_576:.1f} MB de fichero · "
@@ -274,6 +282,116 @@ def _print_ranges(items: tuple[SymbolRanges, ...]) -> None:
     )
     for item in items:
         console.print(f"  {item.name}: {_bias_line(item)}")
+
+
+# --- La capa de enfoque ---------------------------------------------------------
+
+
+def _print_alignment(items: tuple[SymbolRanges, ...]) -> None:
+    """Los rangos H4 y cuánto tiempo pasó el sistema en cada estado."""
+    _print_h4_ranges(items)
+    for mode in MODES:
+        _print_states(items, mode)
+    _print_waiting(items)
+
+
+def _print_h4_ranges(items: tuple[SymbolRanges, ...]) -> None:
+    """El mismo recuento que en el diario, sobre las velas H4.
+
+    Es el MISMO detector y el mismo ciclo de vida: lo que cambia es para qué se
+    leen. Los diarios dan el sesgo; estos dicen cuándo el precio va enfocado.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Rangos", justify="right")
+    table.add_column("Alcistas", justify="right")
+    table.add_column("Bajistas", justify="right")
+    table.add_column("Completados", justify="right")
+    table.add_column("Fallidos", justify="right")
+    table.add_column("Velas", justify="right")
+    table.add_column("Vivos", justify="right")
+    for item in items:
+        resumen = item.h4_summary
+        table.add_row(
+            item.name,
+            f"{resumen.total:,}",
+            f"{resumen.bullish:,}",
+            f"{resumen.bearish:,}",
+            _share(resumen.completed, resumen.completed_pct),
+            _share(resumen.failed, resumen.failed_pct),
+            "—"
+            if resumen.mean_candles_to_resolve is None
+            else f"{resumen.mean_candles_to_resolve:.1f}",
+            f"{resumen.active:,}",
+        )
+    console.print(
+        f"\n[bold]Rangos CRT de {TIMEFRAME_LABELS.get(FOCUS_TIMEFRAME, FOCUS_TIMEFRAME)}"
+        f"[/bold] [dim]({DEFAULT_PARAMS.describe()} · "
+        f"{DEFAULT_ALIGNMENT.describe().split(' · ')[-1]})[/dim]"
+    )
+    console.print(table)
+
+
+def _print_states(items: tuple[SymbolRanges, ...], mode: str) -> None:
+    """Qué porcentaje del tiempo pasó el sistema en cada estado, en ese modo.
+
+    El tiempo se mide en VELAS H4, que es el reloj con el que se reevalúa: cada
+    fila es un cierre de vela. Los dos modos se imprimen juntos a propósito, que
+    es la comparación que hay que poder hacer de un vistazo.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Velas H4", justify="right")
+    for state in STATES:
+        table.add_column(state.replace("_", " ").title(), justify="right")
+    for item in items:
+        resumen = alignment_summary(item, mode)
+        table.add_row(
+            item.name,
+            f"{resumen.total:,}",
+            *(
+                f"{resumen.share(state):.1f} % ({resumen.counts.get(state, 0):,})"
+                for state in STATES
+            ),
+        )
+    console.print(f"\n[bold]Alineación H4 · modo {mode}[/bold]")
+    console.print(table)
+
+
+def _print_waiting(items: tuple[SymbolRanges, ...]) -> None:
+    """Cuánto esperó cada rango diario COMPLETADO a que H4 se pusiera a favor.
+
+    Es la pregunta de si el filtro llega tarde: un rango que llegó a su objetivo
+    mientras el sistema seguía en TARGET DEFINIDO es una oportunidad que la
+    alineación dejó pasar entera.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Modo", style="dim")
+    table.add_column("Rangos D1 completados", justify="right")
+    table.add_column("Se alinearon", justify="right")
+    table.add_column("Nunca", justify="right")
+    table.add_column("Velas H4 de espera (media)", justify="right")
+    table.add_column("Mediana", justify="right")
+    for item in items:
+        for position, mode in enumerate(MODES):
+            espera = alignment_waiting(item, mode)
+            table.add_row(
+                item.name if position == 0 else "",
+                mode,
+                f"{espera.total:,}",
+                f"{len(espera.aligned):,}",
+                "—" if not espera.never else f"[yellow]{espera.never:,}[/yellow]",
+                "—" if espera.mean_bars is None else f"{espera.mean_bars:.1f}",
+                "—" if espera.median_bars is None else f"{espera.median_bars:.0f}",
+            )
+    console.print("\n[bold]Espera hasta la primera vela alineada[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]Se cuentan sólo los rangos diarios que llegaron a su objetivo y que "
+        "pasaron por TARGET DEFINIDO: son los que había que haber operado. «Nunca» "
+        "son los que se completaron sin que H4 llegase a ponerse a favor.[/dim]"
+    )
 
 
 def _share(count: int, percent: float | None) -> str:

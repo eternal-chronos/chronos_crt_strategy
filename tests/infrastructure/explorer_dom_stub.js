@@ -59,6 +59,7 @@ function declare(id) {
  'tf-buttons', 'view-buttons', 'preset-buttons', 'chart', 'zoom-reset',
  'prev', 'next', 'from', 'to',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
+ 'crt-group', 'crt-resolved', 'crt-bias', 'crt-bias-note', 'crt-table', 'crt-table-caption',
  'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
  'line-group', 'line-buttons', 'line-undo', 'line-clear',
@@ -98,7 +99,11 @@ global.document = {
     if (!elements[id]) { missing.push(id); declare(id); }
     return elements[id];
   },
-  createElement() { return makeElement('created'); },
+  createElement(tag) {
+    const element = makeElement('created');
+    element.tagName = String(tag).toUpperCase();
+    return element;
+  },
   createTextNode(text) { return { text: text }; },
   addEventListener(type, handler) {
     (documentListeners[type] = documentListeners[type] || []).push(handler);
@@ -129,9 +134,9 @@ function pressKey(key, focusedTag) {
   global.document.activeElement = null;
 }
 
-/* Lo que NO ha puesto una mano. Hoy son las velas y la vela en formación, y
- * nada más: si algún día aparece una traza que no sea ninguna de las dos, este
- * explorador habrá empezado a dibujar algo calculado y el test lo dirá. */
+/* Las trazas de PRECIO: velas, cierres y la vela en formación. Cualquier otra
+ * es una capa calculada, y el test dice cuál se admite: hoy, la de los rangos
+ * CRT y ninguna más. */
 function priceLayer(name) {
   return /^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
@@ -152,8 +157,14 @@ function handDrawn(shape) {
   return simShape(shape) || rectShape(shape) || lineShape(shape);
 }
 
-/* El punto más a la derecha de todo lo que NO ha dibujado una mano. En el
- * replay nada de eso puede caer más allá del reloj. */
+/* Lo que dibuja el MOTOR: los rangos CRT. Va aparte de lo de la mano a
+ * propósito, porque de eso depende cómo se lee el gráfico. */
+function crtShape(shape) {
+  return String(shape.name || '').indexOf('crt-') === 0;
+}
+
+/* El punto más a la derecha de todo lo que NO ha dibujado una mano —velas y
+ * rangos CRT—. En el replay nada de eso puede caer más allá del reloj. */
 function furthest(traces, layout) {
   const points = [];
   traces.forEach(function (trace) {
@@ -179,7 +190,8 @@ global.Plotly = {
     plotCalls.push({
       maxX: furthest(traces, layout),
       target: target,
-      // Ninguna traza puede ser otra cosa que precio mientras no haya estrategia.
+      // Las trazas que no son precio: la capa calculada. El test comprueba
+      // cuáles son, no que no haya ninguna.
       calculated: traces.filter(function (trace) { return !priceLayer(trace.name); })
         .map(function (trace) { return trace.name; }),
       traces: traces.map(function (trace) {
@@ -195,11 +207,22 @@ global.Plotly = {
       firstBar: traces[0] && traces[0].x && traces[0].x[0],
       lastBar: traces[0] && traces[0].x && traces[0].x[traces[0].x.length - 1],
       hover: traces[0] && traces[0].text && traces[0].text[0],
-      // Todo lo que hay en `shapes` lo ha puesto una mano: si algún día aparece
-      // ahí algo que no lo sea, este recuento deja de ser cero.
+      // Todo lo que hay en `shapes` lo ha puesto una mano o es un rango CRT: si
+      // aparece ahí cualquier otra cosa, este recuento deja de ser cero.
       shapes: (layout.shapes || []).filter(function (shape) {
-        return !handDrawn(shape);
+        return !handDrawn(shape) && !crtShape(shape);
       }).length,
+      crt: (layout.shapes || []).filter(crtShape).map(function (shape) {
+        return {
+          name: shape.name, type: shape.type,
+          x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
+          color: (shape.line && shape.line.color) || null,
+          dash: (shape.line && shape.line.dash) || null,
+          fillcolor: shape.fillcolor || null,
+          label: (shape.label && shape.label.text) || null,
+          layer: shape.layer || null,
+        };
+      }),
       sim: (layout.shapes || []).filter(simShape).map(function (shape) {
         return {
           name: shape.name, type: shape.type,
@@ -234,6 +257,31 @@ global.Plotly = {
   },
 };
 
+/* Los nodos de una etiqueta dentro de un árbol de elementos del stub. La tabla
+ * de rangos se construye con createElement/appendChild, así que se puede leer
+ * igual que la leería el navegador. */
+function collect(node, tag, out) {
+  (node.children || []).forEach(function (child) {
+    if (child.tagName === tag) { out.push(child); }
+    collect(child, tag, out);
+  });
+  return out;
+}
+
+function crtTableRows() {
+  return collect(elements['crt-table'], 'TR', []).map(function (row) {
+    return (row.children || []).map(function (cell) { return cell.textContent; });
+  });
+}
+
+/* Lo más a la derecha que llega un rango dibujado. En replay no puede pasar del
+ * reloj: sería enseñar antes de tiempo algo que el motor todavía no sabía. */
+function crtFurthest() {
+  const shapes = (plotCalls[plotCalls.length - 1] || {}).crt || [];
+  const edges = shapes.map(function (shape) { return shape.x1; }).sort();
+  return edges.length ? edges[edges.length - 1] : null;
+}
+
 function pressed(container, key) {
   const found = elements[container].children.filter(function (button) {
     return button.getAttribute('aria-pressed') === 'true';
@@ -266,6 +314,13 @@ function snapshot(label) {
     rectArmed: pressed('rect-buttons', 'kind'),
     rectUndoDisabled: elements['rect-undo'].disabled === true,
     rectClearDisabled: elements['rect-clear'].disabled === true,
+    crtBias: elements['crt-bias'].textContent,
+    crtNote: elements['crt-bias-note'].textContent,
+    crtCaption: elements['crt-table-caption'].textContent,
+    crtRows: crtTableRows(),
+    crtMaxX: crtFurthest(),
+    crtResolvedChecked: elements['crt-resolved'].checked === true,
+    crtResolvedDisabled: elements['crt-resolved'].disabled === true,
     lineArmed: pressed('line-buttons', 'kind'),
     lineUndoDisabled: elements['line-undo'].disabled === true,
     lineClearDisabled: elements['line-clear'].disabled === true,
@@ -375,6 +430,37 @@ viewButtons[1].fire('click');
 steps.push(snapshot('lineas'));
 viewButtons[0].fire('click');
 steps.push(snapshot('velas'));
+
+// --- Los rangos CRT: la única capa que calcula el motor -----------------------
+//
+// Se dibujan sólo sobre su temporalidad, el sesgo y la tabla se ven en todas, y
+// en replay no puede aparecer nada que el motor no supiera todavía.
+const crtTf = payload.crt.timeframe;
+selectSymbol(payload.symbols[0].id);
+selectChart(crtTf);
+presets[0].fire('click');
+steps.push(snapshot('crt-en-su-temporalidad'));
+
+// Sin los resueltos quedan sólo los vivos, en el gráfico y en la tabla.
+elements['crt-resolved'].fire('change', { target: { checked: false } });
+steps.push(snapshot('crt-sin-resueltos'));
+elements['crt-resolved'].fire('change', { target: { checked: true } });
+
+// En otra temporalidad no se dibuja ningún rango; el sesgo y la tabla siguen.
+selectChart(payload.symbols[0].charts[1]);
+steps.push(snapshot('crt-en-otra-temporalidad'));
+selectChart(crtTf);
+
+// El replay: un rango no aparece hasta que su vela de confirmación ha cerrado.
+const crtSerie = payload.symbols[0].bars[crtTf].t;
+elements['replay-date'].value = new Date(crtSerie[Math.floor(crtSerie.length / 2)] * 60000)
+  .toISOString().slice(0, 10);
+elements['replay-start'].fire('click');
+steps.push(snapshot('crt-replay-inicio'));
+elements['replay-step'].fire('click');
+elements['replay-step'].fire('click');
+steps.push(snapshot('crt-replay-paso'));
+elements['replay-exit'].fire('click');
 
 // --- Replay -------------------------------------------------------------------
 const h4 = payload.symbols[0].charts.indexOf('H4') >= 0 ? 'H4' : payload.symbols[0].charts[0];

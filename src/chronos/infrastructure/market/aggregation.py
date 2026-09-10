@@ -194,6 +194,28 @@ def session_buckets(
     return labels, ends
 
 
+def bar_closes(
+    labels: pd.DatetimeIndex, timeframe: str, config: AggregationConfig
+) -> pd.DatetimeIndex:
+    """Instante en que cierra cada vela ya agregada, a partir de su etiqueta.
+
+    Las velas van etiquetadas al INICIO de su intervalo, así que la etiqueta no
+    dice cuándo se supo lo que hay dentro. Quien tenga que decidir si una vela ya
+    había cerrado a una hora —el replay, sin ir más lejos— necesita esto.
+
+    Con ancla de sesión no vale sumar 24 horas: los dos días del año en que se
+    mueve el reloj la sesión dura 23 o 25, y ahí la cuenta a mano adelantaría o
+    atrasaría el cierre una hora. Se resuelve con la misma rejilla que agregó las
+    velas.
+    """
+    anchor = _anchor_for(timeframe, config)
+    if anchor is None:
+        _freq, _offset, span = _bins(timeframe, config)
+        return pd.DatetimeIndex(pd.DatetimeIndex(labels) + span)
+    _starts, ends = session_buckets(pd.DatetimeIndex(labels), timeframe, anchor)
+    return ends
+
+
 def _localized(naive: pd.DatetimeIndex, anchor: SessionAnchor) -> pd.DatetimeIndex:
     """Pasa una hora de pared de la plaza a UTC.
 

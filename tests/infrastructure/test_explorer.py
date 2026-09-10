@@ -1,12 +1,12 @@
-"""El explorador de velas: lo que se dibuja y lo que se marca a mano.
+"""El explorador de velas: lo que calcula el motor y lo que marca la mano.
 
-Es la única herramienta visual del proyecto y todavía no hay estrategia que
-dibujar, así que lo que se comprueba aquí es doble:
+Es la única herramienta visual del proyecto y lo que se comprueba aquí es doble:
 
   · que el CHASIS funciona —los cuatro pares, las temporalidades, la ventana, el
     replay, el zoom y las herramientas de mano—, y
-  · que NO dibuja nada calculado. Mientras no exista una regla, cualquier traza
-    que no sean las velas es un error, y el test lo dice con nombre.
+  · que la ÚNICA capa calculada que se dibuja es la de los rangos CRT. Cualquier
+    otra traza o forma que no sea precio ni marca de mano es un error, y el test
+    lo dice con nombre.
 
 El JavaScript se ejecuta con node contra un DOM simulado: no sustituye a mirar
 el fichero en un navegador, pero detecta lo que más se rompe —identificadores
@@ -45,11 +45,13 @@ from chronos.infrastructure.reporting.explorer import (
     BEARISH,
     BULLISH,
     HAND_COLORS,
+    RangeLayer,
     bar_counts,
     build_payload,
     payload_size,
     render_explorer,
 )
+from chronos.interface.crt_layer import build_ranges, range_layer
 from tests.conftest import make_m1_history
 
 #: Dos pares con precios de escalas muy distintas: es lo que obliga a que los
@@ -108,6 +110,16 @@ def run() -> ChartRun:
     return _run()
 
 
+@pytest.fixture(scope="module")
+def layer(run: ChartRun) -> RangeLayer:
+    """La capa calculada, compuesta como la compone la CLI.
+
+    El explorador no la detecta: la recibe. Aquí se hace lo mismo que en el
+    punto de composición para dibujar exactamente lo que se dibujaría de verdad.
+    """
+    return range_layer(build_ranges(run))
+
+
 # --- Payload ------------------------------------------------------------------
 
 
@@ -142,22 +154,67 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
     assert spans[DAILY] == 1440
 
 
-def test_el_payload_no_lleva_ni_una_capa_calculada(run: ChartRun) -> None:
-    """Mientras no haya estrategia, lo único que viaja son velas.
+def test_el_payload_lleva_una_sola_capa_calculada_y_se_llama_por_su_nombre(
+    run: ChartRun,
+) -> None:
+    """Los rangos CRT y nada más.
 
-    Es la promesa del proyecto nuevo: este explorador es un chasis. Si un día
-    aparece una clave que no sea de las de abajo, será porque alguien ha metido
-    una capa calculada y este test tiene que enterarse.
+    Si un día aparece una clave que no sea de las de abajo, será porque alguien
+    ha metido otra capa calculada y este test tiene que enterarse.
     """
     payload = build_payload(run)
     assert set(payload) == {
-        "meta", "colors", "labels", "keys", "marks", "symbols", "unavailable"
+        "meta", "colors", "labels", "keys", "marks", "crt", "symbols", "unavailable"
     }
     for symbol in payload["symbols"]:
         assert set(symbol) == {
             "id", "label", "decimals", "side", "provenance",
-            "charts", "spans", "bars", "skipped",
+            "charts", "spans", "bars", "skipped", "ranges",
         }
+
+
+def test_sin_capa_el_payload_lo_dice_en_vez_de_callarse(run: ChartRun) -> None:
+    """Un explorador sin rangos tiene que poder dibujarse igual."""
+    payload = build_payload(run)
+    assert payload["crt"]["timeframe"] is None
+    assert all(symbol["ranges"] == [] for symbol in payload["symbols"])
+
+
+def test_los_rangos_viajan_por_par_con_lo_que_hace_falta_para_dibujarlos(
+    run: ChartRun, layer: RangeLayer
+) -> None:
+    payload = build_payload(run, ranges=layer)
+
+    assert payload["crt"]["timeframe"] == DAILY
+    assert payload["crt"]["label"] == "Diario"
+    assert payload["crt"]["tp"] == "TP D1"
+    assert payload["crt"]["description"]
+
+    rangos = payload["symbols"][0]["ranges"]
+    assert rangos, "la fixture tiene que dar algún rango que dibujar"
+    assert set(rangos[0]) == {
+        "id", "dir", "up", "ref", "confirm", "known", "high", "low", "manip",
+        "target", "invalidation", "size", "sizeAtr", "status", "resolved",
+        "resolvedAt", "candles", "ambiguous",
+    }
+    for item in rangos:
+        # La vela de referencia va antes de la de confirmación, y el rango no
+        # existe hasta que ésta CIERRA.
+        assert item["ref"] < item["confirm"] < item["known"]
+        assert item["low"] < item["high"]
+        assert (item["resolved"] is None) == (item["resolvedAt"] is None)
+        if item["resolved"] is not None:
+            assert item["resolved"] > item["confirm"]
+            assert item["resolvedAt"] > item["known"]
+
+
+def test_cada_par_lleva_sus_propios_rangos(run: ChartRun, layer: RangeLayer) -> None:
+    """El euro de la fixture es el oro reescalado: los mismos rangos, otros precios."""
+    payload = build_payload(run, ranges=layer)
+    oro, euro = payload["symbols"][0]["ranges"], payload["symbols"][1]["ranges"]
+
+    assert len(oro) == len(euro)
+    assert oro[0]["high"] > 100 > euro[0]["high"]
 
 
 def test_los_nombres_de_las_marcas_salen_de_la_configuracion() -> None:
@@ -218,10 +275,14 @@ def test_el_html_es_autocontenido(run: ChartRun) -> None:
     assert "src=" not in html.split('<script id="explorer-data"')[0]
 
 
-def test_el_html_dice_en_la_cabecera_que_no_hay_estrategia(run: ChartRun) -> None:
-    html = render_explorer(run)
-    assert "sin estrategia" in html
+def test_la_cabecera_dice_qué_capa_calculada_lleva(run: ChartRun, layer: RangeLayer) -> None:
+    html = render_explorer(run, ranges=layer)
+    assert "capa calculada: rangos CRT de Diario" in html
     assert "XAUUSD (oro) · EURUSD" in html
+
+
+def test_sin_capa_la_cabecera_no_promete_ninguna(run: ChartRun) -> None:
+    assert "sin ninguna capa calculada" in render_explorer(run)
 
 
 def test_el_json_embebido_no_puede_cerrar_la_etiqueta(run: ChartRun) -> None:
@@ -238,13 +299,15 @@ def test_el_tamano_del_payload_se_puede_vigilar(run: ChartRun) -> None:
 # --- El JavaScript, contra un DOM simulado ------------------------------------
 
 
-def _draw(run: ChartRun, tmp_path: Path) -> dict:
+def _draw(run: ChartRun, layer: RangeLayer, tmp_path: Path) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node no está disponible: no se puede ejecutar el JavaScript")
 
     payload_path = tmp_path / "payload.json"
-    payload_path.write_text(json.dumps(build_payload(run), default=str), encoding="utf-8")
+    payload_path.write_text(
+        json.dumps(build_payload(run, ranges=layer), default=str), encoding="utf-8"
+    )
     stub = Path(__file__).parent / "explorer_dom_stub.js"
     output = subprocess.run(
         [node, str(stub), str(ASSETS / "explorer.js"), str(payload_path)],
@@ -256,8 +319,10 @@ def _draw(run: ChartRun, tmp_path: Path) -> dict:
 
 
 @pytest.fixture(scope="module")
-def drawn(run: ChartRun, tmp_path_factory: pytest.TempPathFactory) -> dict:
-    return _draw(run, tmp_path_factory.mktemp("explorer"))
+def drawn(
+    run: ChartRun, layer: RangeLayer, tmp_path_factory: pytest.TempPathFactory
+) -> dict:
+    return _draw(run, layer, tmp_path_factory.mktemp("explorer"))
 
 
 def _step(resultado: dict, label: str) -> dict:
@@ -273,26 +338,32 @@ def test_el_explorador_se_dibuja_sin_errores(drawn: dict) -> None:
     assert _step(drawn, "todo")["plot"]["target"] == "chart"
 
 
-def test_no_se_dibuja_ni_una_traza_que_no_sea_precio(drawn: dict) -> None:
-    """La promesa del proyecto, comprobada en cada paso del recorrido."""
+def test_la_unica_traza_calculada_es_la_de_los_rangos(drawn: dict) -> None:
+    """La promesa del proyecto, comprobada en cada paso del recorrido.
+
+    Este test nació diciendo que NINGUNA traza podía ser otra cosa que velas.
+    Al escribirse la primera regla se actualizó a propósito: ahora dice cuál es
+    la capa calculada que se admite. Cualquier otra sigue siendo un error.
+    """
     for step in drawn["steps"]:
-        assert step["plot"]["calculated"] == [], (
-            f"en «{step['label']}» hay trazas que no son velas: {step['plot']['calculated']}"
-        )
+        for name in step["plot"]["calculated"]:
+            assert name.startswith("Rangos CRT"), (
+                f"en «{step['label']}» hay una traza que no es ni precio ni rangos: {name}"
+            )
 
 
-def test_lo_unico_que_hay_en_shapes_lo_ha_puesto_una_mano(drawn: dict) -> None:
+def test_en_shapes_solo_hay_marcas_a_mano_y_rangos_crt(drawn: dict) -> None:
     for step in drawn["steps"]:
         assert step["plot"]["shapes"] == 0, (
-            f"en «{step['label']}» hay formas que no ha dibujado el propietario"
+            f"en «{step['label']}» hay formas que no ha puesto ni la mano ni el motor"
         )
 
 
-def test_el_estado_dice_que_no_hay_estrategia(drawn: dict) -> None:
-    """Un gráfico pelado sin decirlo se lee como que ahí no pasó nada."""
+def test_el_estado_separa_lo_que_calcula_el_motor_de_lo_que_pones_tu(drawn: dict) -> None:
+    """Un rectángulo encima del precio no dice por sí solo quién lo dibujó."""
     notas = _step(drawn, "todo")["notes"]
-    assert "SIN ESTRATEGIA" in notas
-    assert "lo pone tu mano" in notas
+    assert "LO QUE CALCULA EL MOTOR SON LOS RANGOS CRT DE DIARIO Y NADA MÁS" in notas
+    assert "Todo lo demás que se dibuje encima del precio lo pones tú" in notas
 
 
 # --- El selector de par --------------------------------------------------------
@@ -437,6 +508,129 @@ def test_arrastrar_sobre_los_ejes_reescala(drawn: dict) -> None:
     fechas = _step(drawn, "eje-fechas-arrastrado")["lastRelayout"]
     assert "yaxis.range" in precios
     assert "xaxis.range" in fechas
+
+
+# --- Los rangos CRT: la capa que calcula el motor ---------------------------------
+
+
+def _rangos(step: dict) -> list[dict]:
+    return [shape for shape in step["plot"]["crt"] if shape["name"].startswith("crt-rango-")]
+
+
+def _objetivos(step: dict) -> list[dict]:
+    return [shape for shape in step["plot"]["crt"] if shape["name"].startswith("crt-tp-")]
+
+
+def _marcas(step: dict) -> dict | None:
+    trazas = [
+        trace for trace in step["plot"]["traces"]
+        if str(trace["name"]).startswith("Rangos CRT")
+    ]
+    return trazas[0] if trazas else None
+
+
+def test_los_rangos_se_dibujan_sobre_su_temporalidad(drawn: dict) -> None:
+    diario = _step(drawn, "crt-en-su-temporalidad")
+    assert _rangos(diario), "en Diario tiene que haber rangos dibujados"
+    # Un rectángulo por rango y una línea de objetivo por rango.
+    assert len(_objetivos(diario)) == len(_rangos(diario))
+    # Y la mecha de manipulación, en una sola traza de puntos.
+    assert _marcas(diario)["points"] == len(_rangos(diario))
+
+
+def test_en_otra_temporalidad_no_se_dibuja_ningun_rango(drawn: dict) -> None:
+    """Un rango diario encima de H4 ocuparía la pantalla y no se leería."""
+    otra = _step(drawn, "crt-en-otra-temporalidad")
+    assert otra["chart"] != DAILY
+    assert otra["plot"]["crt"] == []
+    assert _marcas(otra) is None
+    assert "se dibujan sólo sobre ese gráfico" in otra["notes"]
+
+
+def test_el_rectangulo_va_por_debajo_del_precio_y_dice_su_estado_con_el_trazo(
+    drawn: dict,
+) -> None:
+    rangos = _rangos(_step(drawn, "crt-en-su-temporalidad"))
+    assert all(shape["layer"] == "below" for shape in rangos), (
+        "los rangos no pueden tapar las velas"
+    )
+    trazos = {shape["dash"] for shape in rangos}
+    assert trazos == {"solid", "dot"}, (
+        "el trazo distingue el rango vivo del resuelto y el recorrido tiene de los dos"
+    )
+    assert all(shape["y0"] < shape["y1"] for shape in rangos)
+
+
+def test_la_linea_del_objetivo_lleva_su_etiqueta(drawn: dict) -> None:
+    etiquetas = {shape["label"] for shape in _objetivos(_step(drawn, "crt-en-su-temporalidad"))}
+    assert "TP D1" in etiquetas
+    assert all(shape["dash"] == "dash" for shape in _objetivos(_step(drawn, "crt-en-su-temporalidad")))
+
+
+def test_ocultar_los_resueltos_deja_solo_los_vivos(drawn: dict) -> None:
+    todos = _rangos(_step(drawn, "crt-en-su-temporalidad"))
+    vivos = _rangos(_step(drawn, "crt-sin-resueltos"))
+
+    assert 0 < len(vivos) < len(todos)
+    assert {shape["dash"] for shape in vivos} == {"solid"}
+    assert "los resueltos están ocultos" in _step(drawn, "crt-sin-resueltos")["notes"]
+    assert _step(drawn, "crt-sin-resueltos")["crtResolvedChecked"] is False
+    assert _step(drawn, "crt-en-su-temporalidad")["crtResolvedChecked"] is True
+
+
+def test_el_panel_dice_hacia_donde_va_el_precio(drawn: dict) -> None:
+    panel = _step(drawn, "crt-en-su-temporalidad")["crtBias"]
+    assert panel.startswith("Sesgo D1: ")
+    if "SIN TARGET" not in panel:
+        assert "Target" in panel and "Invalidación" in panel
+
+
+def test_el_sesgo_y_la_tabla_se_ven_tambien_fuera_del_diario(drawn: dict) -> None:
+    """El sesgo diario manda se mire lo que se mire."""
+    otra = _step(drawn, "crt-en-otra-temporalidad")
+    assert otra["crtBias"].startswith("Sesgo D1: ")
+    assert len(otra["crtRows"]) > 1
+
+
+def test_la_tabla_lista_los_rangos_conocidos(drawn: dict) -> None:
+    filas = _step(drawn, "crt-en-su-temporalidad")["crtRows"]
+    assert filas[0] == [
+        "nº", "dirección", "confirmado (UTC)", "rango", "manipulación",
+        "objetivo", "tamaño", "estado", "resuelto (UTC)", "velas",
+    ]
+    datos = filas[1:]
+    assert datos, "tiene que haber rangos que listar"
+    assert all(len(fila) == len(filas[0]) for fila in datos)
+    # La más reciente arriba.
+    assert datos[0][2] >= datos[-1][2]
+    assert "los detecta el motor" in _step(drawn, "crt-en-su-temporalidad")["crtCaption"]
+
+
+def test_en_replay_no_se_dibuja_ningun_rango_mas_alla_del_reloj(drawn: dict) -> None:
+    """Lo que el motor no sabía todavía no puede estar en la pantalla."""
+    for label in ("crt-replay-inicio", "crt-replay-paso"):
+        step = _step(drawn, label)
+        assert step["crtMaxX"] is not None, f"«{label}» no dibuja ningún rango"
+        assert step["crtMaxX"][:16] <= _reloj(step)
+
+
+def test_el_replay_solo_ensena_los_rangos_ya_confirmados(drawn: dict) -> None:
+    replay = _step(drawn, "crt-replay-inicio")
+    completo = _step(drawn, "crt-en-su-temporalidad")
+    assert len(_rangos(replay)) < len(_rangos(completo))
+    assert len(replay["crtRows"]) < len(completo["crtRows"])
+
+
+def test_la_venda_tapa_tambien_lo_que_calcula_el_motor(drawn: dict) -> None:
+    """Enseñar el sesgo mientras se pide una opinión a ciegas sería contar el final."""
+    ciega = _step(drawn, "ciega")
+    revelada = _step(drawn, "ciega-revelada")
+
+    assert ciega["plot"]["crt"] == []
+    assert ciega["crtBias"] == "Sesgo D1: TAPADO"
+    assert ciega["crtRows"][1][0].startswith("la auditoría ciega tapa")
+    assert "la venda tapa también los RANGOS CRT" in ciega["notes"]
+    assert revelada["plot"]["crt"], "al revelar tienen que aparecer"
 
 
 # --- La caja simulada ------------------------------------------------------------

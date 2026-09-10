@@ -1,11 +1,12 @@
 """CLI del explorador de velas.
 
 Punto de composición: aquí se juntan configuración, carga de bid/ask,
-verificación de zona horaria, agregación M1 → M15/H1/H4/D y el HTML.
+verificación de zona horaria, agregación M1 → M15/H1/H4/D, las capas CRT
+—rangos diarios, rangos H4 y la alineación entre los dos— y el HTML.
 
-No hay ningún comando de estrategia porque todavía no hay estrategia. Cuando la
-haya, sus comandos van en su propio módulo y éste sigue haciendo lo que hace:
-enseñar las velas.
+Este módulo no detecta nada: la regla vive en `domain/crt` y se compone en
+`interface/crt_layer`. Aquí sólo se llama, se imprime y se le pasa al dibujo lo
+que ya está calculado.
 """
 
 from __future__ import annotations
@@ -21,6 +22,7 @@ from rich.table import Table
 
 from chronos.application.chart.config import TIMEFRAME_LABELS, ExplorerConfig
 from chronos.application.chart.timezone_audit import TimezoneAudit, audit_timezone
+from chronos.domain.crt.alignment import MODES, STATES
 from chronos.domain.errors import DomainError
 from chronos.infrastructure.config.loader import ConfigError, load_explorer_config
 from chronos.infrastructure.market.chart_run import ChartRun, SymbolBars, build_chart_run
@@ -30,6 +32,18 @@ from chronos.infrastructure.reporting.explorer import (
     build_payload,
     payload_size,
     render_explorer,
+)
+from chronos.interface.crt_layer import (
+    DEFAULT_ALIGNMENT,
+    DEFAULT_PARAMS,
+    FOCUS_TIMEFRAME,
+    RANGE_TIMEFRAME,
+    SymbolRanges,
+    alignment_layer,
+    alignment_summary,
+    alignment_waiting,
+    build_ranges,
+    range_layer,
 )
 
 chart_app = typer.Typer(
@@ -117,14 +131,22 @@ def explorer(
         run = build_chart_run(run_config, only=symbol or None)
         _report_unavailable(run)
         _print_summary(run)
+        # Antes que nada: un día de mercado que falte no da error, da un rango
+        # detectado contra la vela equivocada.
+        ranges = build_ranges(run)
+        _print_coverage(ranges)
         _audit_or_stop(run, run_config, skip_tz_audit)
 
+        layer = range_layer(ranges)
+        focus = alignment_layer(ranges)
         destination = out or (Path(run_config.reporting.output_dir) / EXPLORER_FILE)
         destination.parent.mkdir(parents=True, exist_ok=True)
-        html = render_explorer(run)
+        html = render_explorer(run, ranges=layer, alignment=focus)
         destination.write_text(html, encoding="utf-8")
 
-        payload = build_payload(run)
+        payload = build_payload(run, ranges=layer, alignment=focus)
+        _print_ranges(ranges)
+        _print_alignment(ranges)
         console.print(
             f"\n[green]OK[/green] explorador → {destination}\n"
             f"[dim]{len(html) / 1_048_576:.1f} MB de fichero · "
@@ -166,6 +188,228 @@ def _print_summary(run: ChartRun) -> None:
     for item in run.symbols:
         for note in item.skipped:
             console.print(f"[yellow]Aviso:[/yellow] {item.name} · {note}")
+
+
+# --- La capa CRT --------------------------------------------------------------
+
+#: Cuántos días que faltan se nombran uno a uno antes de resumir por años.
+_MISSING_SHOWN = 8
+
+
+def _print_coverage(items: tuple[SymbolRanges, ...]) -> None:
+    """Los días de mercado que faltan en el histórico diario de cada par.
+
+    Se imprime ANTES de dibujar y antes de contar nada: si falta un día, el
+    siguiente se lee contra el anterior y el rango sale de dos velas que en el
+    mercado no fueron consecutivas.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Sesiones", justify="right")
+    table.add_column("Esperadas", justify="right")
+    table.add_column("Faltan", justify="right")
+    table.add_column("Tramo")
+    for item in items:
+        coverage = item.coverage
+        faltan = len(coverage.missing)
+        table.add_row(
+            item.name,
+            f"{coverage.present:,}",
+            f"{coverage.expected:,}",
+            "—" if not faltan else f"[yellow]{faltan:,}[/yellow]",
+            "—"
+            if coverage.first is None
+            else f"{coverage.first:%Y-%m-%d} → {coverage.last:%Y-%m-%d}",
+        )
+    console.print("\n[bold]Días de mercado en el histórico diario[/bold]")
+    console.print(table)
+
+    for item in items:
+        missing = item.coverage.missing
+        if not missing:
+            continue
+        nombres = ", ".join(f"{moment:%Y-%m-%d}" for moment in missing[:_MISSING_SHOWN])
+        resto = (
+            ""
+            if len(missing) <= _MISSING_SHOWN
+            else " · por año: "
+            + ", ".join(
+                f"{year}: {count}" for year, count in sorted(item.coverage.missing_by_year().items())
+            )
+        )
+        console.print(
+            f"[yellow]Faltan[/yellow] {len(missing):,} sesiones en {item.name}: "
+            f"{nombres}{'…' if len(missing) > _MISSING_SHOWN else ''}{resto}\n"
+            "[dim]Los festivos salen aquí igual que una descarga incompleta: quien mira "
+            "sabe qué día fue Navidad.[/dim]"
+        )
+
+
+def _print_ranges(items: tuple[SymbolRanges, ...]) -> None:
+    """Cuántos rangos hay, qué fue de ellos y hacia dónde apunta el último vivo."""
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Rangos", justify="right")
+    table.add_column("Alcistas", justify="right")
+    table.add_column("Bajistas", justify="right")
+    table.add_column("Completados", justify="right")
+    table.add_column("Fallidos", justify="right")
+    table.add_column("Velas", justify="right")
+    table.add_column("Vivos", justify="right")
+    for item in items:
+        resumen = item.summary
+        table.add_row(
+            item.name,
+            f"{resumen.total:,}",
+            f"{resumen.bullish:,}",
+            f"{resumen.bearish:,}",
+            _share(resumen.completed, resumen.completed_pct),
+            _share(resumen.failed, resumen.failed_pct),
+            "—"
+            if resumen.mean_candles_to_resolve is None
+            else f"{resumen.mean_candles_to_resolve:.1f}",
+            f"{resumen.active:,}",
+        )
+    console.print(
+        f"\n[bold]Rangos CRT de {TIMEFRAME_LABELS.get(RANGE_TIMEFRAME, RANGE_TIMEFRAME)}"
+        f"[/bold] [dim]({DEFAULT_PARAMS.describe()})[/dim]"
+    )
+    console.print(table)
+    console.print(
+        "[dim]«Velas» es la media de velas que tardaron en resolverse. Los porcentajes "
+        "van sobre los rangos ya RESUELTOS —los vivos no han fallado todavía— y los "
+        "expirados cuentan como resueltos.[/dim]"
+    )
+    for item in items:
+        console.print(f"  {item.name}: {_bias_line(item)}")
+
+
+# --- La capa de enfoque ---------------------------------------------------------
+
+
+def _print_alignment(items: tuple[SymbolRanges, ...]) -> None:
+    """Los rangos H4 y cuánto tiempo pasó el sistema en cada estado."""
+    _print_h4_ranges(items)
+    for mode in MODES:
+        _print_states(items, mode)
+    _print_waiting(items)
+
+
+def _print_h4_ranges(items: tuple[SymbolRanges, ...]) -> None:
+    """El mismo recuento que en el diario, sobre las velas H4.
+
+    Es el MISMO detector y el mismo ciclo de vida: lo que cambia es para qué se
+    leen. Los diarios dan el sesgo; estos dicen cuándo el precio va enfocado.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Rangos", justify="right")
+    table.add_column("Alcistas", justify="right")
+    table.add_column("Bajistas", justify="right")
+    table.add_column("Completados", justify="right")
+    table.add_column("Fallidos", justify="right")
+    table.add_column("Velas", justify="right")
+    table.add_column("Vivos", justify="right")
+    for item in items:
+        resumen = item.h4_summary
+        table.add_row(
+            item.name,
+            f"{resumen.total:,}",
+            f"{resumen.bullish:,}",
+            f"{resumen.bearish:,}",
+            _share(resumen.completed, resumen.completed_pct),
+            _share(resumen.failed, resumen.failed_pct),
+            "—"
+            if resumen.mean_candles_to_resolve is None
+            else f"{resumen.mean_candles_to_resolve:.1f}",
+            f"{resumen.active:,}",
+        )
+    console.print(
+        f"\n[bold]Rangos CRT de {TIMEFRAME_LABELS.get(FOCUS_TIMEFRAME, FOCUS_TIMEFRAME)}"
+        f"[/bold] [dim]({DEFAULT_PARAMS.describe()} · "
+        f"{DEFAULT_ALIGNMENT.describe().split(' · ')[-1]})[/dim]"
+    )
+    console.print(table)
+
+
+def _print_states(items: tuple[SymbolRanges, ...], mode: str) -> None:
+    """Qué porcentaje del tiempo pasó el sistema en cada estado, en ese modo.
+
+    El tiempo se mide en VELAS H4, que es el reloj con el que se reevalúa: cada
+    fila es un cierre de vela. Los dos modos se imprimen juntos a propósito, que
+    es la comparación que hay que poder hacer de un vistazo.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Velas H4", justify="right")
+    for state in STATES:
+        table.add_column(state.replace("_", " ").title(), justify="right")
+    for item in items:
+        resumen = alignment_summary(item, mode)
+        table.add_row(
+            item.name,
+            f"{resumen.total:,}",
+            *(
+                f"{resumen.share(state):.1f} % ({resumen.counts.get(state, 0):,})"
+                for state in STATES
+            ),
+        )
+    console.print(f"\n[bold]Alineación H4 · modo {mode}[/bold]")
+    console.print(table)
+
+
+def _print_waiting(items: tuple[SymbolRanges, ...]) -> None:
+    """Cuánto esperó cada rango diario COMPLETADO a que H4 se pusiera a favor.
+
+    Es la pregunta de si el filtro llega tarde: un rango que llegó a su objetivo
+    mientras el sistema seguía en TARGET DEFINIDO es una oportunidad que la
+    alineación dejó pasar entera.
+    """
+    table = Table(box=None, pad_edge=False)
+    table.add_column("Par", style="dim")
+    table.add_column("Modo", style="dim")
+    table.add_column("Rangos D1 completados", justify="right")
+    table.add_column("Se alinearon", justify="right")
+    table.add_column("Nunca", justify="right")
+    table.add_column("Velas H4 de espera (media)", justify="right")
+    table.add_column("Mediana", justify="right")
+    for item in items:
+        for position, mode in enumerate(MODES):
+            espera = alignment_waiting(item, mode)
+            table.add_row(
+                item.name if position == 0 else "",
+                mode,
+                f"{espera.total:,}",
+                f"{len(espera.aligned):,}",
+                "—" if not espera.never else f"[yellow]{espera.never:,}[/yellow]",
+                "—" if espera.mean_bars is None else f"{espera.mean_bars:.1f}",
+                "—" if espera.median_bars is None else f"{espera.median_bars:.0f}",
+            )
+    console.print("\n[bold]Espera hasta la primera vela alineada[/bold]")
+    console.print(table)
+    console.print(
+        "[dim]Se cuentan sólo los rangos diarios que llegaron a su objetivo y que "
+        "pasaron por TARGET DEFINIDO: son los que había que haber operado. «Nunca» "
+        "son los que se completaron sin que H4 llegase a ponerse a favor.[/dim]"
+    )
+
+
+def _share(count: int, percent: float | None) -> str:
+    return f"{count:,}" if percent is None else f"{count:,} ({percent:.0f} %)"
+
+
+def _bias_line(item: SymbolRanges) -> str:
+    """Hacia dónde va el precio a la última vela cerrada de ese par."""
+    bias = item.bias
+    cuando = "" if item.as_of is None else f" a {item.as_of:%Y-%m-%d %H:%M} UTC"
+    if "target" not in bias:
+        return f"[dim]sesgo SIN TARGET{cuando}: ningún rango vivo[/dim]"
+    return (
+        f"sesgo [bold]{str(bias['direction']).upper()}[/bold]{cuando} · "
+        f"target {bias['target']:,.{item.decimals}f} · "
+        f"invalidación {bias['invalidation']:,.{item.decimals}f} "
+        f"[dim](rango nº {bias['range_id']})[/dim]"
+    )
 
 
 def _bar_line(payload: dict[str, Any]) -> str:

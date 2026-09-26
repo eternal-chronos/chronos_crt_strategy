@@ -31,6 +31,7 @@ import pytest
 from chronos.application.chart.config import (
     DAILY,
     H1,
+    H3,
     H4,
     H12,
     M15,
@@ -58,13 +59,13 @@ from tests.conftest import make_m1_history
 
 #: Dos pares con precios de escalas muy distintas: es lo que obliga a que los
 #: decimales, el pip y el eje sean POR PAR y no una constante del explorador.
-#: El oro trae además H12, que el euro no: los gráficos también son POR PAR.
+#: El oro trae además H12 y H3, que el euro no: los gráficos también son POR PAR.
 GOLD = SymbolConfig(
     symbol="XAUUSD",
     label="XAUUSD (oro)",
     bid_path="x.parquet",
     decimals=2,
-    timeframes=(DAILY, H12, H4, H1, M15),
+    timeframes=(DAILY, H12, H4, H3, H1, M15),
 )
 EURO = SymbolConfig(symbol="EURUSD", label="EURUSD", bid_path="y.parquet", decimals=5)
 
@@ -139,21 +140,22 @@ def test_cada_par_lleva_sus_velas_en_sus_temporalidades(run: ChartRun) -> None:
     counts = bar_counts(build_payload(run))
     assert set(counts) == {"XAUUSD", "EURUSD"}
     assert set(counts["EURUSD"]) == {DAILY, H4, H1, M15}
-    assert set(counts["XAUUSD"]) == {DAILY, H12, H4, H1, M15}
+    assert set(counts["XAUUSD"]) == {DAILY, H12, H4, H3, H1, M15}
     for charts in counts.values():
         assert charts[M15] > charts[H1] > charts[H4] > charts[DAILY]
     oro = counts["XAUUSD"]
-    assert oro[H4] > oro[H12] > oro[DAILY]
+    assert oro[H1] > oro[H3] > oro[H4] > oro[H12] > oro[DAILY]
 
 
 def test_los_graficos_de_cada_par_van_de_mayor_a_menor(run: ChartRun) -> None:
     charts = {item["id"]: item["charts"] for item in build_payload(run)["symbols"]}
-    assert charts["XAUUSD"] == [DAILY, H12, H4, H1, M15]
+    assert charts["XAUUSD"] == [DAILY, H12, H4, H3, H1, M15]
     assert charts["EURUSD"] == [DAILY, H4, H1, M15]
 
 
 def test_la_tecla_de_h12_viaja_aunque_solo_la_use_un_par(run: ChartRun) -> None:
     assert build_payload(run)["keys"][H12] == "2"
+    assert build_payload(run)["keys"][H3] == "3"
 
 
 def test_una_temporalidad_de_par_no_soportada_falla_con_nombre() -> None:
@@ -167,6 +169,7 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
     spans = build_payload(run)["symbols"][0]["spans"]
     assert spans[M15] == 15
     assert spans[H1] == 60
+    assert spans[H3] == 180
     assert spans[H4] == 240
     assert spans[H12] == 720
     # Con ancla de sesión el diario no dura siempre lo mismo, pero la moda sí.
@@ -190,7 +193,7 @@ def test_la_unica_capa_calculada_del_payload_son_los_rangos_diarios(run: ChartRu
         }
         assert symbol["ranges"], f"{symbol['id']}: la fixture debería dar algún rango"
         for rango in symbol["ranges"]:
-            assert set(rango) == {"dir", "ref", "confirm", "end", "reason", "high", "low"}
+            assert set(rango) == {"dir", "ref", "confirm", "end", "high", "low"}
             assert rango["dir"] in {"bullish", "bearish"}
             assert rango["ref"] < rango["confirm"]
             assert rango["end"] is None or rango["end"] > rango["confirm"]
@@ -319,7 +322,7 @@ def test_el_explorador_se_dibuja_sin_errores(drawn: dict) -> None:
     assert not drawn["unknownElements"], (
         f"el explorador busca elementos que la plantilla no define: {drawn['unknownElements']}"
     )
-    assert drawn["chartTabs"] == ["Diario", "H12", "H4", "H1", "M15"]
+    assert drawn["chartTabs"] == ["Diario", "H12", "H4", "H3", "H1", "M15"]
     assert drawn["presetLabels"][0] == "Todo"
     assert _step(drawn, "todo")["plot"]["target"] == "chart"
 
@@ -336,30 +339,60 @@ def test_lo_unico_calculado_son_los_rangos_y_solo_en_el_diario(drawn: dict) -> N
         )
         if step["chart"] != DAILY:
             assert not calculadas, f"en «{step['label']}» ({step['chart']}) se dibujan rangos"
-    assert set(_step(drawn, "todo")["plot"]["calculated"]) == RANGOS
+
+
+def _vivos(symbol: dict, step: dict) -> list[dict]:
+    """Los rangos del payload vivos al cierre de la última vela a la vista."""
+    ultima = pd.Timestamp(step["plot"]["lastBar"], tz="UTC")
+    borde = int((ultima - pd.Timestamp("1970-01-01", tz="UTC")).total_seconds() // 60)
+    borde += symbol["spans"][DAILY]
+    dia = symbol["spans"][DAILY]
+    return [
+        r for r in symbol["ranges"]
+        if r["confirm"] + dia <= borde and (r["end"] is None or r["end"] + dia > borde)
+    ]
+
+
+def test_solo_se_dibuja_el_rango_vivo(run: ChartRun, drawn: dict) -> None:
+    """Los que ya se frenaron, por lo que sea, no se dibujan: sólo el vivo al
+    cierre de la última vela a la vista —en replay, el vivo a esa fecha—."""
+    simbolos = {symbol["id"]: symbol for symbol in build_payload(run)["symbols"]}
+    vistos = 0
+    for step in drawn["steps"]:
+        if step["chart"] != DAILY or "ocultos hasta Revelar" in step["notes"]:
+            continue
+        symbol = simbolos[step["symbol"]]
+        assert any(r["end"] is not None for r in symbol["ranges"]), "la fixture debería frenar alguno"
+        vivos = _vivos(symbol, step)
+        esperados = {("Rangos CRT diarios · " + ("bajistas" if r["dir"] == "bearish" else "alcistas"))
+                     for r in vivos}
+        dibujados = step["plot"]["ranges"]
+        assert {r["name"] for r in dibujados} == esperados, f"«{step['label']}»"
+        assert sum(r["boxes"] for r in dibujados) == len(vivos) <= 1, f"«{step['label']}»"
+        for rango in dibujados:
+            assert "sigue vivo" in rango["caption"]
+        vistos += len(dibujados)
+    assert vistos, "algún paso del recorrido debería enseñar un rango vivo"
 
 
 def test_los_rangos_van_rellenos_y_con_su_color(drawn: dict) -> None:
-    rangos = {r["name"]: r for r in _step(drawn, "todo")["plot"]["ranges"]}
-    assert rangos["Rangos CRT diarios · bajistas"]["color"] == RANGE_COLORS["bearish"]
-    assert rangos["Rangos CRT diarios · alcistas"]["color"] == RANGE_COLORS["bullish"]
-    for rango in rangos.values():
+    rangos = [r for step in drawn["steps"] for r in step["plot"]["ranges"]]
+    assert rangos
+    for rango in rangos:
+        sentido = "bearish" if rango["name"].endswith("bajistas") else "bullish"
+        assert rango["color"] == RANGE_COLORS[sentido]
         assert rango["fill"] == "toself"
-        assert rango["boxes"] > 0
+        assert rango["boxes"] == 1
         assert "(calculado)" in rango["caption"]
 
 
 def test_el_replay_no_ensena_rangos_mas_alla_del_reloj(drawn: dict) -> None:
-    """Ni un rango antes de cerrar su vela de confirmación, ni su final antes de tiempo."""
+    """Ni un rango antes de cerrar su vela de confirmación, ni estirado más allá."""
     step = _step(drawn, "replay-en-el-mayor")
     assert step["chart"] == DAILY
     assert step["plot"]["ranges"], "el replay en el Diario debería enseñar algún rango"
     for rango in step["plot"]["ranges"]:
         assert rango["maxX"][:16] <= _reloj(step)
-    # A mitad de histórico se ven menos que con todo el histórico a la vista.
-    antes = sum(r["boxes"] for r in step["plot"]["ranges"])
-    todos = sum(r["boxes"] for r in _step(drawn, "todo")["plot"]["ranges"])
-    assert antes < todos
 
 
 def test_la_auditoria_ciega_oculta_los_rangos_hasta_revelar(drawn: dict) -> None:
@@ -367,7 +400,7 @@ def test_la_auditoria_ciega_oculta_los_rangos_hasta_revelar(drawn: dict) -> None
     assert ciega["chart"] == DAILY
     assert ciega["plot"]["calculated"] == []
     assert "ocultos hasta Revelar" in ciega["notes"]
-    assert set(_step(drawn, "ciega-revelada")["plot"]["calculated"]) == RANGOS
+    assert "ocultos hasta Revelar" not in _step(drawn, "ciega-revelada")["notes"]
 
 
 def test_el_estado_dice_que_rangos_se_ven(drawn: dict) -> None:
@@ -435,14 +468,15 @@ def test_el_boton_del_par_dice_lo_que_lleva(drawn: dict) -> None:
 def test_cada_temporalidad_dibuja_sus_velas(drawn: dict) -> None:
     velas = {
         timeframe: _step(drawn, f"grafico-{timeframe}")["plot"]["bars"]
-        for timeframe in (DAILY, H12, H4, H1, M15)
+        for timeframe in (DAILY, H12, H4, H3, H1, M15)
     }
-    assert velas[M15] > velas[H1] > velas[H4] > velas[H12] > velas[DAILY]
+    assert velas[M15] > velas[H1] > velas[H3] > velas[H4] > velas[H12] > velas[DAILY]
 
 
 def test_las_teclas_saltan_de_grafico(drawn: dict) -> None:
     assert _step(drawn, f"teclado-tf-{H4}")["chart"] == H4
     assert _step(drawn, f"teclado-tf-{H12}")["chart"] == H12
+    assert _step(drawn, f"teclado-tf-{H3}")["chart"] == H3
     assert _step(drawn, f"teclado-tf-{M15}")["chart"] == M15
     # Con el foco en un campo la tecla escribe y no salta.
     assert _step(drawn, "teclado-tf-en-un-campo")["chart"] == M15
@@ -510,6 +544,14 @@ def test_el_paso_adelante_y_atras_se_deshacen(drawn: dict) -> None:
     assert _reloj(paso) > _reloj(inicio)
     assert _reloj(atras) == _reloj(inicio)
     assert paso["plot"]["lastBar"] >= inicio["plot"]["lastBar"]
+
+
+def test_h4_se_arma_con_h1_y_no_con_h3(drawn: dict) -> None:
+    """H3 va justo debajo de H4 en la lista, pero una H3 quedaría partida entre
+    dos H4: la vela H4 en curso se forma en cuatro pasos de una hora, no en dos
+    de tres."""
+    notas = _step(drawn, "replay-paso")["notes"]
+    assert re.search(r"vela en formación con 1 de 4 velas", notas), notas
 
 
 def test_el_reloj_del_replay_sobrevive_al_cambio_de_par(drawn: dict) -> None:

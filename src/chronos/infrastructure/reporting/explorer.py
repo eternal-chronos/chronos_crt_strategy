@@ -180,6 +180,8 @@ def _ranges_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
     Viajan etiquetas y no cierres: el navegador sabe cuándo cierra cada vela
     (`t + span`), con la misma cuenta con la que mueve el reloj del replay.
+    Viajan también los que ya se frenaron, aunque sólo se dibuje el vivo: en
+    replay hay que saber cuál estaba vivo en cada fecha.
     """
     ranges = crt_ranges(frame)
     minutes = _epoch_minutes(pd.DatetimeIndex(frame.index))
@@ -189,16 +191,14 @@ def _ranges_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
             "ref": minutes[reference],
             "confirm": minutes[confirmation],
             "end": minutes[end] if end >= 0 else None,
-            "reason": reason or None,
             "high": round(float(high), _PAYLOAD_DECIMALS),
             "low": round(float(low), _PAYLOAD_DECIMALS),
         }
-        for direction, reference, confirmation, end, reason, high, low in zip(
+        for direction, reference, confirmation, end, high, low in zip(
             ranges["direction"].tolist(),
             ranges["reference"].tolist(),
             ranges["confirmation"].tolist(),
             ranges["end"].tolist(),
-            ranges["end_reason"].tolist(),
             ranges["high"].tolist(),
             ranges["low"].tolist(),
             strict=True,

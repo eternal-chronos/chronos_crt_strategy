@@ -27,14 +27,29 @@ explorador lo dice.
 Referencia para cuando el propietario pida cada parte. **No implementar nada de
 esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
 
-**Rangos CRT** (`domain/crt/ranges.py`): sus reglas valen igual en **D, 12H, 3H
-y 1H**. No en 15M ni menores. Falta **agregar la temporalidad 3H**.
+**Rangos CRT** (`domain/crt/ranges.py`): sus reglas valen igual en **D, 12H,
+4H, 3H y 1H**. No en 15M ni menores. H3 ya existe en el explorador (tecla `3`);
+H12 de momento sólo en el oro.
+
+**Horario (hora de Nueva York, `America/New_York`, con su horario de verano):**
+
+- **02:00 en punto → se decide el día.** Se mira la dirección con lo que haya a
+  esa hora. Si no hay dirección ni en D, ni en 12H, ni en 4H, **ese día no se
+  opera ni se busca nada más**.
+- **De 02:00 a 12:00 → ventana de entradas.** Sólo se entra dentro de ella.
+- **Hasta 16:30 → vida máxima de la posición.** Una entrada abierta en la
+  ventana puede seguir abierta si no toca stop, take ni BE; a las 16:30 se
+  cierra sí o sí.
+- Por definir al implementarlo: «lo que haya a las 02:00» son los rangos
+  confirmados por velas **cerradas** antes de esa hora (el diario abre a las
+  17:00 NY, así que su vela del día aún está en curso a las 02:00).
 
 **Flujo:**
 
 - **D → dirección**: el sentido del rango vivo es la dirección.
-- **12H → dirección de respaldo**, sólo si D no tiene ningún rango. Si 12H
-  tampoco tiene, **ese día no se opera**.
+- **12H → dirección de respaldo**, sólo si D no tiene ningún rango.
+- **4H → segundo respaldo**, sólo si ni D ni 12H tienen rango. Si 4H tampoco,
+  **ese día no se opera**.
 - **3H → confirmación**: un rango en el sentido de la dirección.
 - **1H → validación**: comprobar que el rango de 3H es bueno (criterio por definir).
 - **15M → entrada** (criterio por definir).
@@ -49,7 +64,7 @@ la vela que lo completa hace nacer en esa misma vela un rango a favor, ese rango
 nuevo **no cuenta**; hay que esperar otro rango a favor, posterior. Ejemplo: se
 busca bajista, en 3H hay un alcista vivo; una vela sube, toca el máximo de su
 vela 1, lo rechaza y cierra dentro → termina el alcista y nace un bajista (caja =
-la vela anterior). Ese bajista no confirma. En D y 12H el rango nacido así sí
+la vela anterior). Ese bajista no confirma. En D, 12H y 4H el rango nacido así sí
 cuenta. Ojo al implementarlo: esa vela `ranges.py` la apunta como `rechazo` (va
 antes que `objetivo` en la prioridad); la excepción debe mirar si la vela tocó
 el objetivo, no el `end_reason`.

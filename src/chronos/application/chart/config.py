@@ -17,26 +17,42 @@ from chronos.domain.errors import DomainError
 #: Temporalidades que el explorador sabe construir desde un histórico M1.
 M15 = "M15"
 H1 = "H1"
+H3 = "H3"
 H4 = "H4"
 H12 = "H12"
 DAILY = "D"
 
-SUPPORTED_TIMEFRAMES = (M15, H1, H4, H12, DAILY)
+SUPPORTED_TIMEFRAMES = (M15, H1, H3, H4, H12, DAILY)
 
-TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, H12: 720, DAILY: 1440}
+TIMEFRAME_MINUTES: dict[str, int] = {
+    M15: 15,
+    H1: 60,
+    H3: 180,
+    H4: 240,
+    H12: 720,
+    DAILY: 1440,
+}
 
 #: Cómo se escribe cada temporalidad en los controles y en la leyenda.
 TIMEFRAME_LABELS: dict[str, str] = {
     DAILY: "Diario",
     H12: "H12",
     H4: "H4",
+    H3: "H3",
     H1: "H1",
     M15: "M15",
 }
 
 #: Tecla que salta a cada gráfico. Va aquí y no en el JavaScript porque el
 #: explorador dibuja sólo las temporalidades que la configuración pide.
-TIMEFRAME_KEYS: dict[str, str] = {DAILY: "d", H12: "2", H4: "4", H1: "1", M15: "m"}
+TIMEFRAME_KEYS: dict[str, str] = {
+    DAILY: "d",
+    H12: "2",
+    H4: "4",
+    H3: "3",
+    H1: "1",
+    M15: "m",
+}
 
 
 def by_size(timeframes: Iterable[str], *, descending: bool = True) -> tuple[str, ...]:

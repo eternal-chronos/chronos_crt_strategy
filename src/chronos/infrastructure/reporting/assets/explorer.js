@@ -307,22 +307,18 @@
   /* Los rangos llegan RESUELTOS del motor: cuándo nació cada uno, sus extremos y
    * la vela que lo frenó. Aquí no se decide nada: se elige qué parte se enseña.
    *
-   * Sólo en el Diario, que es donde se calculan. Un rango EXISTE desde el cierre
-   * de la vela que lo confirma y se dibuja desde la vela 1 hasta el cierre de la
-   * vela que lo frenó; si sigue vivo, hasta la última vela a la vista. En replay
-   * no se enseña ninguno que no hubiera cerrado su vela de confirmación, ni su
-   * final antes de que ocurriera: lo que muere después del reloj, sigue vivo. */
+   * Sólo en el Diario, que es donde se calculan, y SÓLO EL QUE SIGUE VIVO: uno
+   * que ya se frenó, por lo que sea, deja de importar y no se dibuja. Vivo quiere
+   * decir vivo al cierre de la última vela a la vista, así que en replay se ve
+   * el que estaba vivo en ese momento aunque muera después, y ninguno antes de
+   * que cierre su vela de confirmación. Se dibuja desde la vela 1 hasta ese
+   * cierre. El motor sólo deja uno vivo a la vez. */
   var RANGE_CHART = "D";
   var RANGE_NAMES = { bearish: "Rangos CRT diarios · bajistas", bullish: "Rangos CRT diarios · alcistas" };
-  var RANGE_REASONS = {
-    rechazo: "lo frenó un rechazo en sentido contrario",
-    cierre_fuera: "lo frenó un cierre fuera de la vela 1",
-    objetivo: "llegó al extremo contrario de la vela 1"
-  };
 
   function rangesShown() { return state.chart === RANGE_CHART && !blindfolded(); }
 
-  /* Los rangos que se ven en este tramo, con el final tal como se sabía en él. */
+  /* Los rangos vivos al cierre de la última vela del tramo. */
   function visibleRanges(cut) {
     var b = bars();
     if (!rangesShown() || cut.end <= cut.start) { return []; }
@@ -330,16 +326,11 @@
     var lo = b.t[cut.start];
     var edge = b.t[cut.end - 1] + daySpan;   // cierre de la última vela a la vista
     return (sym().ranges || []).filter(function (r) {
-      var ended = r.end !== null ? r.end + daySpan : null;
-      return r.confirm + daySpan <= edge && (ended === null || ended > lo);
+      return r.confirm + daySpan <= edge && (r.end === null || r.end + daySpan > edge);
     }).map(function (r) {
-      var ended = r.end !== null && r.end + daySpan <= edge ? r.end + daySpan : null;
       // Uno que nació antes del tramo se recorta a su borde: si no, estiraría el
       // eje hacia fechas que no se están mirando.
-      return {
-        range: r, from: Math.max(r.ref, lo), to: ended === null ? edge : ended,
-        alive: ended === null
-      };
+      return { range: r, from: Math.max(r.ref, lo), to: edge };
     });
   }
 
@@ -352,8 +343,7 @@
         var caption = (dir === "bearish" ? "Rango CRT bajista" : "Rango CRT alcista") +
           " (calculado)<br>vela 1 " + stamp(r.ref) + " · confirma " + stamp(r.confirm) +
           "<br>máximo " + price(r.high) + " · mínimo " + price(r.low) +
-          "<br>" + (item.alive ? "sigue vivo" :
-            RANGE_REASONS[r.reason] + " el " + stamp(r.end));
+          "<br>sigue vivo";
         [item.from, item.to, item.to, item.from, item.from].forEach(function (minute) { x.push(iso(minute)); });
         [r.high, r.high, r.low, r.low, r.high].forEach(function (value) { y.push(value); });
         for (var i = 0; i < 5; i++) { text.push(caption); }
@@ -369,7 +359,7 @@
   }
 
   /* Qué se ve de la capa calculada y qué no. Se dice siempre: un Diario sin
-   * rangos en la ventana no es lo mismo que un H4 donde no se dibujan. */
+   * rango vivo no es lo mismo que un H4 donde no se dibujan. */
   function rangeCaption(cut) {
     if (state.chart !== RANGE_CHART) {
       return "rangos CRT diarios (calculados): sólo se dibujan en el Diario";
@@ -377,23 +367,30 @@
     if (blindfolded()) {
       return "rangos CRT diarios (calculados): ocultos hasta Revelar";
     }
-    var shown = visibleRanges(cut);
-    var alive = shown.filter(function (item) { return item.alive; })[0];
-    return "rangos CRT diarios (calculados por el motor): " + shown.length +
-      " en la ventana" + (alive
-        ? " · vivo: " + (alive.range.dir === "bearish" ? "bajista" : "alcista") +
+    var alive = visibleRanges(cut)[0];
+    return "rangos CRT diarios (calculados por el motor): sólo el vivo, los frenados no se " +
+      "dibujan · " + (alive
+        ? "vivo: " + (alive.range.dir === "bearish" ? "bajista" : "alcista") +
           " de " + price(alive.range.low) + " a " + price(alive.range.high)
-        : " · ninguno vivo");
+        : "ninguno vivo");
   }
 
   /* La vela en formación. Se arma con las velas de la temporalidad inferior que
    * ya han cerrado dentro del intervalo en curso: en H4, con las de H1. Va hueca
    * y en su propia traza porque no es una vela cerrada: es la forma de mirar
-   * cómo se va haciendo. */
+   * cómo se va haciendo.
+   *
+   * Es la siguiente de la lista cuya duración cabe un número entero de veces en
+   * la vela: H4 no se arma con H3 (una H3 quedaría partida entre dos H4), sino
+   * con H1. */
   function finer() {
-    var position = charts().indexOf(state.chart);
-    var next = position < 0 ? null : charts()[position + 1];
-    return next && barsOf(next) ? next : null;
+    var list = charts();
+    var position = list.indexOf(state.chart);
+    if (position < 0) { return null; }
+    for (var i = position + 1; i < list.length; i++) {
+      if (barsOf(list[i]) && span(state.chart) % span(list[i]) === 0) { return list[i]; }
+    }
+    return null;
   }
 
   /* Las velas inferiores que caen dentro de la vela que se está formando, como

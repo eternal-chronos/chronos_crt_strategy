@@ -12,12 +12,47 @@ estrategia corre sin cambios en backtest, paper y live**.
 
 ## Dónde está el proyecto
 
-**Todavía no hay estrategia.** Lo que hay es el chasis: el histórico de cuatro
-pares —XAUUSD, EURUSD, GBPUSD y USDJPY—, el explorador para mirarlos y marcar
-encima a mano, y el motor de backtest con su contrato de estrategia vacío.
+**La estrategia está empezando.** Sobre el chasis —el histórico de cuatro
+pares (XAUUSD, EURUSD, GBPUSD y USDJPY), el explorador para mirarlos y marcar
+encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
+una primera pieza calculada: los rangos CRT diarios con su ciclo de vida
+(`domain/crt/ranges.py`), dibujados como capa propia sobre el Diario del
+explorador. El resto del flujo está en la sección siguiente, por programar.
 
-Lo primero que se escriba será una estrategia. Hasta entonces, cualquier cosa que
-se dibuje encima del precio la ha puesto una mano, y el explorador lo dice.
+Todo lo demás que se dibuje encima del precio lo ha puesto una mano, y el
+explorador lo dice.
+
+## Reglas de la estrategia (dictadas, pendientes de programar)
+
+Referencia para cuando el propietario pida cada parte. **No implementar nada de
+esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
+
+**Rangos CRT** (`domain/crt/ranges.py`): sus reglas valen igual en **D, 12H, 3H
+y 1H**. No en 15M ni menores. Falta **agregar la temporalidad 3H**.
+
+**Flujo:**
+
+- **D → dirección**: el sentido del rango vivo es la dirección.
+- **12H → dirección de respaldo**, sólo si D no tiene ningún rango. Si 12H
+  tampoco tiene, **ese día no se opera**.
+- **3H → confirmación**: un rango en el sentido de la dirección.
+- **1H → validación**: comprobar que el rango de 3H es bueno (criterio por definir).
+- **15M → entrada** (criterio por definir).
+
+**Completar un rango** = el precio **toca** su extremo objetivo, con la mecha
+basta (bajista: mínimo de la vela 1; alcista: máximo). Con ese toque termina.
+Tocar el extremo contrario y rechazarlo no lo termina; sólo un cierre más allá.
+`ranges.py` ya lo hace así (`objetivo` por toque, `cierre_fuera` por cierre).
+
+**Excepción, sólo en 3H y 1H**: si hay un rango vivo en contra de la dirección y
+la vela que lo completa hace nacer en esa misma vela un rango a favor, ese rango
+nuevo **no cuenta**; hay que esperar otro rango a favor, posterior. Ejemplo: se
+busca bajista, en 3H hay un alcista vivo; una vela sube, toca el máximo de su
+vela 1, lo rechaza y cierra dentro → termina el alcista y nace un bajista (caja =
+la vela anterior). Ese bajista no confirma. En D y 12H el rango nacido así sí
+cuenta. Ojo al implementarlo: esa vela `ranges.py` la apunta como `rechazo` (va
+antes que `objetivo` en la prioridad); la excepción debe mirar si la vela tocó
+el objetivo, no el `end_reason`.
 
 ## Capas
 

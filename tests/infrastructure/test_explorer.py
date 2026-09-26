@@ -33,6 +33,7 @@ from chronos.application.chart.config import (
     H1,
     H3,
     H4,
+    H6,
     H12,
     M15,
     ExplorerConfig,
@@ -59,13 +60,13 @@ from tests.conftest import make_m1_history
 
 #: Dos pares con precios de escalas muy distintas: es lo que obliga a que los
 #: decimales, el pip y el eje sean POR PAR y no una constante del explorador.
-#: El oro trae además H12 y H3, que el euro no: los gráficos también son POR PAR.
+#: El oro trae además H12, H6 y H3, que el euro no: los gráficos también son POR PAR.
 GOLD = SymbolConfig(
     symbol="XAUUSD",
     label="XAUUSD (oro)",
     bid_path="x.parquet",
     decimals=2,
-    timeframes=(DAILY, H12, H4, H3, H1, M15),
+    timeframes=(DAILY, H12, H6, H4, H3, H1, M15),
 )
 EURO = SymbolConfig(symbol="EURUSD", label="EURUSD", bid_path="y.parquet", decimals=5)
 
@@ -140,27 +141,28 @@ def test_cada_par_lleva_sus_velas_en_sus_temporalidades(run: ChartRun) -> None:
     counts = bar_counts(build_payload(run))
     assert set(counts) == {"XAUUSD", "EURUSD"}
     assert set(counts["EURUSD"]) == {DAILY, H4, H1, M15}
-    assert set(counts["XAUUSD"]) == {DAILY, H12, H4, H3, H1, M15}
+    assert set(counts["XAUUSD"]) == {DAILY, H12, H6, H4, H3, H1, M15}
     for charts in counts.values():
         assert charts[M15] > charts[H1] > charts[H4] > charts[DAILY]
     oro = counts["XAUUSD"]
-    assert oro[H1] > oro[H3] > oro[H4] > oro[H12] > oro[DAILY]
+    assert oro[H1] > oro[H3] > oro[H4] > oro[H6] > oro[H12] > oro[DAILY]
 
 
 def test_los_graficos_de_cada_par_van_de_mayor_a_menor(run: ChartRun) -> None:
     charts = {item["id"]: item["charts"] for item in build_payload(run)["symbols"]}
-    assert charts["XAUUSD"] == [DAILY, H12, H4, H3, H1, M15]
+    assert charts["XAUUSD"] == [DAILY, H12, H6, H4, H3, H1, M15]
     assert charts["EURUSD"] == [DAILY, H4, H1, M15]
 
 
 def test_la_tecla_de_h12_viaja_aunque_solo_la_use_un_par(run: ChartRun) -> None:
     assert build_payload(run)["keys"][H12] == "2"
+    assert build_payload(run)["keys"][H6] == "6"
     assert build_payload(run)["keys"][H3] == "3"
 
 
 def test_una_temporalidad_de_par_no_soportada_falla_con_nombre() -> None:
-    raro = replace(GOLD, timeframes=(DAILY, "H6"))
-    with pytest.raises(DomainError, match="H6"):
+    raro = replace(GOLD, timeframes=(DAILY, "H8"))
+    with pytest.raises(DomainError, match="H8"):
         _config(symbols=(raro, EURO))
 
 
@@ -171,6 +173,7 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
     assert spans[H1] == 60
     assert spans[H3] == 180
     assert spans[H4] == 240
+    assert spans[H6] == 360
     assert spans[H12] == 720
     # Con ancla de sesión el diario no dura siempre lo mismo, pero la moda sí.
     assert spans[DAILY] == 1440
@@ -322,7 +325,7 @@ def test_el_explorador_se_dibuja_sin_errores(drawn: dict) -> None:
     assert not drawn["unknownElements"], (
         f"el explorador busca elementos que la plantilla no define: {drawn['unknownElements']}"
     )
-    assert drawn["chartTabs"] == ["Diario", "H12", "H4", "H3", "H1", "M15"]
+    assert drawn["chartTabs"] == ["Diario", "H12", "H6", "H4", "H3", "H1", "M15"]
     assert drawn["presetLabels"][0] == "Todo"
     assert _step(drawn, "todo")["plot"]["target"] == "chart"
 
@@ -468,14 +471,15 @@ def test_el_boton_del_par_dice_lo_que_lleva(drawn: dict) -> None:
 def test_cada_temporalidad_dibuja_sus_velas(drawn: dict) -> None:
     velas = {
         timeframe: _step(drawn, f"grafico-{timeframe}")["plot"]["bars"]
-        for timeframe in (DAILY, H12, H4, H3, H1, M15)
+        for timeframe in (DAILY, H12, H6, H4, H3, H1, M15)
     }
-    assert velas[M15] > velas[H1] > velas[H3] > velas[H4] > velas[H12] > velas[DAILY]
+    assert velas[M15] > velas[H1] > velas[H3] > velas[H4] > velas[H6] > velas[H12] > velas[DAILY]
 
 
 def test_las_teclas_saltan_de_grafico(drawn: dict) -> None:
     assert _step(drawn, f"teclado-tf-{H4}")["chart"] == H4
     assert _step(drawn, f"teclado-tf-{H12}")["chart"] == H12
+    assert _step(drawn, f"teclado-tf-{H6}")["chart"] == H6
     assert _step(drawn, f"teclado-tf-{H3}")["chart"] == H3
     assert _step(drawn, f"teclado-tf-{M15}")["chart"] == M15
     # Con el foco en un campo la tecla escribe y no salta.

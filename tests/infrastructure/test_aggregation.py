@@ -6,6 +6,7 @@ y el día del cambio de reloj la segunda mitad dura 11 o 13 horas, no 12.
 
 H3 es lo mismo en ocho trozos: abre a las 17:00, 20:00, 23:00, 02:00, 05:00...
 locales. La vela de las 02:00 de Nueva York es la que abre la ventana operativa.
+H6, en cuatro: 17:00, 23:00, 05:00 y 11:00 locales.
 """
 
 from __future__ import annotations
@@ -13,7 +14,7 @@ from __future__ import annotations
 import numpy as np
 import pandas as pd
 
-from chronos.application.chart.config import DAILY, H3, H12, AggregationConfig
+from chronos.application.chart.config import DAILY, H3, H6, H12, AggregationConfig
 from chronos.infrastructure.market.aggregation import aggregate, session_buckets
 
 
@@ -124,4 +125,42 @@ def test_sin_ancla_h3_trocea_el_dia_desde_su_hora_de_arranque() -> None:
     assert list(series.frame.index) == [
         pd.Timestamp("2024-01-08 22:00", tz="UTC"),
         pd.Timestamp("2024-01-09 01:00", tz="UTC"),
+    ]
+
+
+def test_con_ancla_de_ny_h6_abre_cada_seis_horas_desde_las_17_locales() -> None:
+    # Julio, con horario de verano: NY = UTC-4, así que 17:00 NY son las 21:00 UTC.
+    frame = _m1("2024-07-08 21:00", "2024-07-09 21:00")
+
+    series = aggregate(frame, H6, AggregationConfig(d_session_start="NY_17:00"))
+
+    local = [stamp.tz_convert("America/New_York").strftime("%H:%M") for stamp in series.frame.index]
+    assert local == ["17:00", "23:00", "05:00", "11:00"]
+    assert "troceada cada 6 h" in series.description
+
+
+def test_cuatro_velas_h6_hacen_la_vela_diaria() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-10 22:00")
+    config = AggregationConfig(d_session_start="NY_17:00")
+
+    pieces = aggregate(frame, H6, config).frame
+    daily = aggregate(frame, DAILY, config).frame
+
+    for position, day in enumerate(daily.index):
+        group = pieces.iloc[4 * position : 4 * position + 4]
+        assert group.index[0] == day
+        assert group["open"].iloc[0] == daily.loc[day, "open"]
+        assert group["close"].iloc[-1] == daily.loc[day, "close"]
+        assert group["high"].max() == daily.loc[day, "high"]
+        assert group["low"].min() == daily.loc[day, "low"]
+
+
+def test_sin_ancla_h6_trocea_el_dia_desde_su_hora_de_arranque() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-09 10:00")
+
+    series = aggregate(frame, H6, AggregationConfig(d_session_start="22:00"))
+
+    assert list(series.frame.index) == [
+        pd.Timestamp("2024-01-08 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 04:00", tz="UTC"),
     ]

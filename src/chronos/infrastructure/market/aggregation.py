@@ -1,4 +1,4 @@
-"""Agregación M1 → H3/H4/H12/Diario con offset configurable (§1.2).
+"""Agregación M1 → H3/H4/H6/H12/Diario con offset configurable (§1.2).
 
 El resultado del módulo depende íntegramente del offset: nada aquí está fijado
 en el código, y cambiar `h4_offset_hours` o `d_session_start` cambia las velas
@@ -26,6 +26,7 @@ from chronos.application.chart.config import (
     H1,
     H3,
     H4,
+    H6,
     H12,
     M15,
     AggregationConfig,
@@ -37,10 +38,11 @@ from chronos.domain.errors import DomainError
 #: Paso que se asume cuando el histórico es demasiado corto para deducirlo.
 DEFAULT_BASE_STEP = pd.Timedelta(minutes=1)
 
-#: Duración de cada trozo de sesión: H3, H4 y H12 son la sesión troceada.
+#: Duración de cada trozo de sesión: H3, H4, H6 y H12 son la sesión troceada.
 SESSION_STEPS: dict[str, pd.Timedelta] = {
     H3: pd.Timedelta(hours=3),
     H4: pd.Timedelta(hours=4),
+    H6: pd.Timedelta(hours=6),
     H12: pd.Timedelta(hours=12),
 }
 
@@ -161,13 +163,13 @@ def aggregate(
 def _anchor_for(timeframe: str, config: AggregationConfig) -> SessionAnchor | None:
     """Ancla de sesión aplicable a esta temporalidad.
 
-    Sólo el diario, H12, H4 y H3 se anclan a la sesión: la rejilla de M15 y H1
+    Sólo el diario, H12, H6, H4 y H3 se anclan a la sesión: la rejilla de M15 y H1
     —cuartos de hora y horas en punto— es la misma en todas las plataformas y no
     depende de dónde empiece el día. Cuando hay ancla, `h4_offset_hours` no pinta
-    nada: H3, H4 y H12 arrancan con la sesión, que es lo que hace la plataforma del
+    nada: H3, H4, H6 y H12 arrancan con la sesión, que es lo que hace la plataforma del
     propietario.
     """
-    if timeframe not in (DAILY, H12, H4, H3):
+    if timeframe not in (DAILY, H12, H6, H4, H3):
         return None
     return config.session_anchor
 
@@ -274,7 +276,7 @@ def _bins(timeframe: str, config: AggregationConfig) -> tuple[str, pd.Timedelta,
     """Frecuencia, desplazamiento y duración del intervalo de una temporalidad.
 
     M15 y H1 no llevan desplazamiento: su rejilla —cuartos de hora y horas en
-    punto— es la misma en todas las plataformas. H3, H4, H12 y el diario admiten
+    punto— es la misma en todas las plataformas. H3, H4, H6, H12 y el diario admiten
     ajuste, que es donde discrepan.
     """
     if timeframe == M15:
@@ -297,6 +299,15 @@ def _bins(timeframe: str, config: AggregationConfig) -> tuple[str, pd.Timedelta,
             "4h",
             pd.Timedelta(hours=config.h4_effective_offset_hours),
             pd.Timedelta(hours=4),
+        )
+    if timeframe == H6:
+        # Sin ancla de sesión, H6 trocea el día desde su hora de arranque: con
+        # el día a las 22:00 UTC, las velas abren a las 22:00, 04:00, 10:00...
+        start = config.session_start_time()
+        return (
+            "6h",
+            pd.Timedelta(hours=start.hour % 6, minutes=start.minute),
+            pd.Timedelta(hours=6),
         )
     if timeframe == H12:
         # Sin ancla de sesión, H12 parte el día por su hora de arranque: con el

@@ -19,16 +19,18 @@ M15 = "M15"
 H1 = "H1"
 H3 = "H3"
 H4 = "H4"
+H6 = "H6"
 H12 = "H12"
 DAILY = "D"
 
-SUPPORTED_TIMEFRAMES = (M15, H1, H3, H4, H12, DAILY)
+SUPPORTED_TIMEFRAMES = (M15, H1, H3, H4, H6, H12, DAILY)
 
 TIMEFRAME_MINUTES: dict[str, int] = {
     M15: 15,
     H1: 60,
     H3: 180,
     H4: 240,
+    H6: 360,
     H12: 720,
     DAILY: 1440,
 }
@@ -37,6 +39,7 @@ TIMEFRAME_MINUTES: dict[str, int] = {
 TIMEFRAME_LABELS: dict[str, str] = {
     DAILY: "Diario",
     H12: "H12",
+    H6: "H6",
     H4: "H4",
     H3: "H3",
     H1: "H1",
@@ -48,6 +51,7 @@ TIMEFRAME_LABELS: dict[str, str] = {
 TIMEFRAME_KEYS: dict[str, str] = {
     DAILY: "d",
     H12: "2",
+    H6: "6",
     H4: "4",
     H3: "3",
     H1: "1",

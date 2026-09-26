@@ -25,7 +25,7 @@ price_side: bid
 # Un par puede declarar los suyos con `timeframes` (el oro lleva también H12).
 # Un par cuyo histórico no dé para alguna de ellas se dibuja igual con las que sí
 # pueda: se avisa de cuál falta y por qué.
-timeframes: [D, H4, H3, H1, M15]
+timeframes: [D, H6, H4, H3, H1, M15]
 
 # --- Los pares --------------------------------------------------------------
 #
@@ -44,7 +44,7 @@ symbols:
     decimals: 2
     # Gráficos propios del oro: los generales más H12. Con el ancla de sesión,
     # H12 parte el día en dos: abre a las 17:00 y a las 05:00 de Nueva York.
-    timeframes: [D, H12, H4, H3, H1, M15]
+    timeframes: [D, H12, H6, H4, H3, H1, M15]
 
   - symbol: EURUSD
     label: EURUSD

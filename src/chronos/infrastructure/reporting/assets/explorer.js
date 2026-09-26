@@ -1,10 +1,9 @@
 /* Explorador de velas multi-par.
  *
- * El chasis del gráfico —velas o cierres, cuatro temporalidades, cuatro pares,
- * ventana de fechas, zoom, replay y las herramientas con las que el propietario
- * marca a mano encima del precio— más UNA capa calculada: los rangos CRT, que
- * llegan ya detectados y resueltos en el payload. Aquí no se calcula ninguno:
- * se elige cuáles se pintan, con qué trazo y hasta dónde los deja ver el reloj.
+ * El chasis del gráfico y NADA MÁS: velas o cierres, cuatro temporalidades,
+ * cuatro pares, ventana de fechas, zoom, replay y las herramientas con las que
+ * el propietario marca a mano encima del precio. No dibuja ninguna capa
+ * calculada porque todavía no hay ninguna estrategia que calcule nada.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
  * con Plotly.react. Es más barato de razonar que llevar la cuenta de índices de
@@ -16,10 +15,8 @@
  * que filtrar por fecha es comparar enteros.
  *
  * TODO LO DE ESTE FICHERO ES DIBUJO. Ni la navegación, ni el replay, ni las
- * marcas a mano, ni el filtro de rangos calculan nada: el payload llega ya
- * armado desde Python y aquí sólo se elige qué parte de él se pinta. Lo que
- * distingue a los rangos CRT de lo demás es quién los puso, y el explorador lo
- * dice en la leyenda, en el panel del sesgo y en el estado.
+ * marcas a mano calculan nada: el payload llega ya armado desde Python y aquí
+ * sólo se elige qué parte de él se pinta.
  *
  * EL PAR ES ESTADO, no otro fichero. Los cuatro históricos viajan dentro del
  * mismo HTML y cambiar de par es cambiar de qué array se lee. Cada par lleva SUS
@@ -38,25 +35,9 @@
 
   var DATA = JSON.parse(document.getElementById("explorer-data").textContent);
   var COLORS = DATA.colors;
-  /* La capa que CALCULA el motor: de qué temporalidad son los rangos, con qué
-   * parámetros salieron y cómo se llama su estado vivo. Llega hecha desde
-   * Python; aquí no se detecta nada. */
-  var CRT = DATA.crt || {};
-  /* La SEGUNDA capa calculada: los rangos CRT de H4 y el estado de alineación
-   * con el sesgo diario, uno por cada cierre de vela H4. Llega hecha igual que
-   * la anterior; aquí no se cruza nada. */
-  var H4 = DATA.h4 || {};
-  //: El azul del contexto diario cuando se dibuja encima de H4.
-  var CONTEXT_COLOR = (H4 && H4.context) || null;
   var SESSION_TZ = DATA.meta.sessionTimezone;
   // El nombre con el que se escribe: `Etc/GMT+4` es el UTC-4 y se lee al revés.
   var SESSION_TZ_LABEL = DATA.meta.sessionTimezoneLabel || SESSION_TZ;
-  /* La plaza que parte el día: el reloj con el que se etiquetan las velas H4.
-   * «La vela de las nueve» sólo se puede decir en esta hora, porque en UTC la
-   * misma vela cae a las 13:00 o a las 14:00 según el mes. Sin ancla de sesión
-   * no hay plaza y las horas de H4 se escriben sólo en UTC. */
-  var ANCHOR_TZ = DATA.meta.anchorTimezone || null;
-  var ANCHOR_LABEL = DATA.meta.anchorPlace || "NY";
   var DAY = 1440;
 
   var PRESETS = [
@@ -114,9 +95,6 @@
      * no hay ninguna orden detrás. */
     sim: null,
     arming: null,
-    /* Rangos CRT ya resueltos: se enseñan o se ocultan, pero no se recalculan.
-     * Es lo único que este control toca: filtrar no calcula nada. */
-    crtResolved: true,
     /* Recuadros marcados a mano. Cada uno es un rectángulo —`kind`, `from`,
      * `to`, `low`, `high`— que planta el propietario para señalar dónde ve algo
      * que todavía no tiene regla que lo detecte. */
@@ -196,17 +174,6 @@
     hour: "2-digit", minute: "2-digit", hour12: false
   });
 
-  var anchorFormat = ANCHOR_TZ === null ? null : new Intl.DateTimeFormat("sv-SE", {
-    timeZone: ANCHOR_TZ, hour: "2-digit", minute: "2-digit", hour12: false
-  });
-
-  /* La hora de PARED de la plaza, `HH:MM`. Es la misma etiqueta con la que
-   * viajan las aperturas de las velas H4, para que la hora a la que una abre y
-   * la hora a la que cierra se puedan leer una al lado de la otra. */
-  function anchorTime(minute) {
-    return anchorFormat === null ? "—" : anchorFormat.format(toDate(minute));
-  }
-
   function stamp(minute) {
     return iso(minute).slice(0, 16) + " UTC · " +
       sessionFormat.format(toDate(minute)).replace(",", "") + " " + SESSION_TZ_LABEL;
@@ -283,10 +250,8 @@
 
   /* Con la venda puesta no se dibuja nada más que las velas: es el punto de la
    * prueba —mirar el gráfico pelado antes de ver lo que marcaste— y por eso el
-   * apagón se hace en un único sitio. Lo que tapa es lo que CALCULA EL MOTOR
-   * —los rangos, el sesgo y la tabla—: enseñarlos mientras se pide una opinión
-   * a ciegas sería contar el final antes de la prueba. Lo que marca la mano
-   * sigue viéndose, porque marcar es justo el gesto de la prueba. */
+   * apagón se hace en un único sitio. Hoy sólo alcanza a las marcas a mano
+   * porque no hay ninguna capa calculada; cuando la haya, se apaga aquí. */
   function blindfolded() { return state.blind && !state.revealed; }
 
   function rgba(hex, alpha) {
@@ -2082,852 +2047,6 @@
     chart.on("plotly_relayout", captureZoom);
   }
 
-  /* --- Los rangos CRT: la ÚNICA capa calculada -------------------------------
-   *
-   * Todo lo demás de este fichero es dibujo a mano. Esto no: los rangos llegan
-   * YA DETECTADOS Y YA RESUELTOS en el payload —los calcula `domain/crt` sobre
-   * las velas diarias— y aquí sólo se eligen cuáles se pintan y con qué trazo.
-   * Filtrar, resaltar u ocultar no calcula nada.
-   *
-   * Un rango es la vela que le saca un extremo a la anterior y cierra dentro de
-   * ella: el rectángulo es el rango de la vela de REFERENCIA, el objetivo es su
-   * extremo contrario y la invalidación, la mecha con la que se lo sacaron.
-   *
-   * Lo que hay que mirar con lupa es CUÁNDO se sabe cada cosa. De cada rango
-   * viajan dos marcas por suceso: la etiqueta de la vela —al inicio de su
-   * intervalo, que es donde se dibuja— y el instante en que esa vela CERRÓ, que
-   * es cuando el motor pudo saberlo. El replay usa siempre la segunda, así que
-   * un rango no aparece hasta que su vela de confirmación ha cerrado y no pasa
-   * a completado o fallido hasta que cierra la que lo resuelve. De la vela en
-   * formación no se marca nada.
-   *
-   * Se dibujan SÓLO sobre su propia temporalidad; el sesgo y la tabla se ven en
-   * todas, porque el sesgo diario manda se mire lo que se mire. */
-
-  //: Tope de rangos dibujados a la vez. Con ocho años a la vista son cientos de
-  //: rectángulos, y Plotly los pinta uno a uno: se dibujan los más recientes y
-  //: el estado dice cuántos se han dejado fuera.
-  var CRT_MAX_DRAWN = 300;
-
-  //: Tope de filas de la tabla, por lo mismo.
-  var CRT_MAX_ROWS = 200;
-
-  function crtTimeframe() { return CRT.timeframe || null; }
-
-  function crtRanges() { return sym().ranges || []; }
-
-  /* Si el gráfico abierto es el de los rangos. Un rango diario encima de M15
-   * ocuparía cientos de velas y no se leería. */
-  function crtOnChart() { return crtTimeframe() !== null && state.chart === crtTimeframe(); }
-
-  /* El reloj con el que se leen los rangos: el del replay, o el borde derecho
-   * de la ventana que se está mirando. Todo lo posterior es futuro. */
-  function crtClock(range) { return state.replay ? state.at : range.hi; }
-
-  function crtColor(item) { return item.up ? COLORS.bullish : COLORS.bearish; }
-
-  /* Los que ya se sabían a esa hora: su vela de confirmación había cerrado. */
-  function crtKnown(clock) {
-    return crtRanges().filter(function (item) { return item.known <= clock; });
-  }
-
-  /* El estado A ESA HORA, que no tiene por qué ser el estado final: un rango
-   * completado en 2024 estaba vivo en 2023 y el replay tiene que enseñarlo
-   * vivo. Se resuelve cuando CIERRA la vela que lo resolvió. */
-  function crtStatus(item, clock) {
-    return item.resolvedAt !== null && item.resolvedAt <= clock
-      ? item.status
-      : (CRT.activeStatus || "activo");
-  }
-
-  function crtAlive(item, clock) {
-    return item.resolvedAt === null || item.resolvedAt > clock;
-  }
-
-  /* Hasta dónde llega el rectángulo: hasta la vela que lo resolvió, o hasta el
-   * reloj si sigue vivo. Ni un minuto más allá del presente. */
-  function crtEnd(item, clock) {
-    return crtAlive(item, clock) ? clock : item.resolvedAt;
-  }
-
-  /* Los que hay que enseñar: conocidos, no filtrados por el interruptor de
-   * resueltos y con su tramo cruzando la ventana. Un rango vivo llega hasta el
-   * reloj, así que entra siempre. */
-  function crtVisible(range) {
-    var clock = crtClock(range);
-    return crtKnown(clock).filter(function (item) {
-      if (!state.crtResolved && !crtAlive(item, clock)) { return false; }
-      return crtEnd(item, clock) >= range.lo && item.ref <= range.hi;
-    });
-  }
-
-  /* Los más recientes cuando hay más de los que se pueden pintar. */
-  function crtDrawn(range) {
-    var visible = crtVisible(range);
-    return visible.slice(Math.max(0, visible.length - CRT_MAX_DRAWN));
-  }
-
-  /* El precio con separador de millares y los decimales del par: el panel se
-   * lee de un vistazo y «1.912,40» se lee mejor que «1912.40». */
-  function priceText(value) {
-    return value.toLocaleString("es-ES", {
-      minimumFractionDigits: decimals(), maximumFractionDigits: decimals()
-    });
-  }
-
-  function crtLabel() { return CRT.label || crtTimeframe() || ""; }
-
-  /* El rectángulo del rango y la línea de su objetivo. Van por DEBAJO de las
-   * velas —el precio no se tapa— y por debajo de todo lo que marca la mano. */
-  function crtShapes(range) {
-    if (!crtOnChart() || blindfolded()) { return []; }
-    var clock = crtClock(range);
-    var shapes = [];
-    crtDrawn(range).forEach(function (item) {
-      var alive = crtAlive(item, clock);
-      var color = crtColor(item);
-      var x0 = iso(item.ref);
-      var x1 = iso(crtEnd(item, clock));
-      shapes.push({
-        type: "rect", name: "crt-rango-" + item.id, xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: item.low, y1: item.high,
-        fillcolor: rgba(color, alive ? 0.13 : 0.05),
-        line: {
-          color: rgba(color, alive ? 0.85 : 0.3),
-          width: alive ? 1.6 : 1,
-          // Continuo el vivo, punteado tenue el que ya terminó: el trazo dice
-          // el estado sin tener que leer ninguna etiqueta.
-          dash: alive ? "solid" : "dot"
-        },
-        layer: "below",
-        label: alive
-          ? {
-            text: "CRT " + item.id + " " + item.dir,
-            textposition: item.up ? "bottom left" : "top left",
-            font: { size: 10, color: color }
-          }
-          : { text: "" }
-      });
-      shapes.push({
-        type: "line", name: "crt-tp-" + item.id, xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: item.target, y1: item.target,
-        line: { color: rgba(color, alive ? 0.9 : 0.3), width: alive ? 1.4 : 1, dash: "dash" },
-        layer: "below",
-        label: alive
-          ? {
-            text: CRT.tp || "TP",
-            textposition: item.up ? "top right" : "bottom right",
-            font: { size: 10, color: color }
-          }
-          : { text: "" }
-      });
-    });
-    return shapes;
-  }
-
-  /* La mecha de manipulación, en una sola traza de puntos: el extremo que la
-   * vela de confirmación le sacó a la de referencia, que es a la vez la
-   * invalidación del rango. El triángulo apunta hacia donde fue la mecha. */
-  function crtTraces(range) {
-    if (!crtOnChart() || blindfolded()) { return []; }
-    var clock = crtClock(range);
-    var x = [], y = [], symbols = [], colors = [], text = [];
-    crtDrawn(range).forEach(function (item) {
-      x.push(iso(item.confirm));
-      y.push(item.manip);
-      symbols.push(item.up ? "triangle-down" : "triangle-up");
-      colors.push(rgba(crtColor(item), crtAlive(item, clock) ? 0.95 : 0.35));
-      text.push(crtHover(item, clock));
-    });
-    if (!x.length) { return []; }
-    return [{
-      type: "scatter", mode: "markers",
-      name: "Rangos CRT " + crtLabel() + " · manipulación (motor)",
-      x: x, y: y,
-      marker: { symbol: symbols, size: 9, color: colors, line: { width: 0 } },
-      text: text, hoverinfo: "text", hoverlabel: { align: "left" }
-    }];
-  }
-
-  function crtHover(item, clock) {
-    var estado = crtStatus(item, clock);
-    return "RANGO CRT " + crtLabel() + " nº " + item.id + " · " + item.dir.toUpperCase() +
-      " · calculado por el motor" +
-      "<br>referencia " + iso(item.ref).slice(0, 16) +
-      "<br>vela confirma: abre " + iso(item.confirm).slice(0, 16) + " UTC · cierra " +
-      iso(item.known).slice(0, 16) + " UTC — existe desde ese cierre" +
-      "<br>rango [" + price(item.low) + ", " + price(item.high) + "] · " +
-      pips(item.size) + " pips" +
-      (item.sizeAtr === null ? "" : " · " + decimal(item.sizeAtr) + " ATR") +
-      "<br>objetivo " + price(item.target) + " · invalidación " + price(item.invalidation) +
-      "<br>estado " + estado.toUpperCase() +
-      (crtAlive(item, clock)
-        ? ""
-        : " el " + iso(item.resolved).slice(0, 16) + " (" + item.candles + " velas)") +
-      (item.ambiguous ? "<br>la misma vela tocó objetivo e invalidación: cuenta como fallido" : "");
-  }
-
-  /* --- ¿Hacia dónde va el precio? --------------------------------------------
-   *
-   * El sesgo es la dirección del rango vivo MÁS RECIENTE: el último que
-   * confirmó y todavía no ha tocado ni su objetivo ni su invalidación. Puede
-   * haber varios vivos a la vez; manda el último porque es el que acaba de
-   * reescribir hacia dónde mira el mercado. Sin ninguno vivo, SIN TARGET. */
-  function crtBias(range) {
-    var clock = crtClock(range);
-    var alive = crtKnown(clock).filter(function (item) { return crtAlive(item, clock); });
-    return alive.length ? alive[alive.length - 1] : null;
-  }
-
-  function syncCrtPanel(range) {
-    var panel = document.getElementById("crt-bias");
-    var note = document.getElementById("crt-bias-note");
-    if (!panel || !note) { return; }
-    var etiqueta = "Sesgo " + (CRT.short || crtLabel()) + ": ";
-    if (blindfolded()) {
-      panel.textContent = etiqueta + "TAPADO";
-      note.textContent = "la auditoría ciega tapa también lo que calcula el motor; " +
-        "pulsa Revelar para verlo";
-      return;
-    }
-    var item = crtBias(range);
-    if (!item) {
-      panel.textContent = etiqueta + "SIN TARGET";
-      note.textContent = "ningún rango vivo a " + iso(crtClock(range)).slice(0, 16) +
-        " UTC: no hay nada hacia lo que ir" +
-        (crtRanges().length ? "" : " (este par no tiene ningún rango calculado)");
-      return;
-    }
-    panel.textContent = etiqueta + item.dir.toUpperCase() +
-      " · Target " + priceText(item.target) +
-      " · Invalidación " + priceText(item.invalidation);
-    note.textContent = "rango nº " + item.id + " de " + sym().label +
-      ", existe desde que cerró su vela de confirmación el " +
-      iso(item.known).slice(0, 16) + " UTC (abrió el " +
-      iso(item.confirm).slice(0, 16) + ") y sigue vivo a " +
-      iso(crtClock(range)).slice(0, 16) + " UTC · lo calcula el motor sobre las velas " +
-      crtLabel().toLowerCase() + " cerradas";
-  }
-
-  /* --- La tabla ---------------------------------------------------------------
-   *
-   * Los rangos de la ventana que se está mirando, del más reciente al más
-   * viejo. Los vivos entran siempre: uno abierto hace meses sigue llegando
-   * hasta el reloj, así que cruza la ventana por definición. */
-  var CRT_HEADERS = [
-    "nº", "dirección", "vela confirma abre (UTC)", "vela confirma cierra (UTC)",
-    "rango", "manipulación", "objetivo", "tamaño", "estado", "resuelto (UTC)", "velas"
-  ];
-
-  function crtTableRows(range) {
-    if (blindfolded()) { return []; }
-    var clock = crtClock(range);
-    var visible = crtVisible(range).slice();
-    visible.reverse();
-    return visible.slice(0, CRT_MAX_ROWS).map(function (item) {
-      var estado = crtStatus(item, clock);
-      var vivo = crtAlive(item, clock);
-      return [
-        String(item.id),
-        item.dir,
-        iso(item.confirm).slice(0, 16),
-        iso(item.known).slice(0, 16),
-        price(item.low) + " – " + price(item.high),
-        price(item.manip),
-        price(item.target),
-        pips(item.size) + " pips" +
-          (item.sizeAtr === null ? "" : " · " + decimal(item.sizeAtr) + " ATR"),
-        estado + (item.ambiguous && !vivo ? " (misma vela)" : ""),
-        vivo ? "—" : iso(item.resolved).slice(0, 16),
-        vivo ? "—" : String(item.candles)
-      ];
-    });
-  }
-
-  function crtCell(tag, text, className) {
-    var cell = document.createElement(tag);
-    cell.textContent = text;
-    if (className) { cell.className = className; }
-    return cell;
-  }
-
-  function crtRow(cells, tag) {
-    var row = document.createElement("tr");
-    cells.forEach(function (text) { row.appendChild(crtCell(tag || "td", text)); });
-    return row;
-  }
-
-  function crtEmptyReason(range) {
-    if (blindfolded()) {
-      return "la auditoría ciega tapa la capa calculada: pulsa Revelar para ver los rangos";
-    }
-    if (!crtRanges().length) {
-      return "no hay ningún rango calculado para " + sym().label;
-    }
-    if (!crtKnown(crtClock(range)).length) {
-      return "todavía no se había confirmado ningún rango a " +
-        iso(crtClock(range)).slice(0, 16) + " UTC";
-    }
-    return "ningún rango conocido cruza este tramo" +
-      (state.crtResolved ? "" : " (los resueltos están ocultos)");
-  }
-
-  function renderCrtTable(range) {
-    var host = document.getElementById("crt-table");
-    var caption = document.getElementById("crt-table-caption");
-    if (!host || !caption) { return; }
-    host.innerHTML = "";
-    var table = document.createElement("table");
-    var head = document.createElement("thead");
-    head.appendChild(crtRow(CRT_HEADERS, "th"));
-    table.appendChild(head);
-
-    var body = document.createElement("tbody");
-    var rows = crtTableRows(range);
-    if (!rows.length) {
-      var empty = document.createElement("tr");
-      var cell = crtCell("td", crtEmptyReason(range), "empty");
-      cell.setAttribute("colspan", String(CRT_HEADERS.length));
-      empty.appendChild(cell);
-      body.appendChild(empty);
-    } else {
-      rows.forEach(function (cells) { body.appendChild(crtRow(cells)); });
-    }
-    table.appendChild(body);
-    host.appendChild(table);
-    caption.textContent = crtTableCaption(range, rows.length);
-  }
-
-  function crtTableCaption(range, shown) {
-    var clock = crtClock(range);
-    var known = crtKnown(clock);
-    var alive = known.filter(function (item) { return crtAlive(item, clock); }).length;
-    var text = "RANGOS CRT DE " + crtLabel().toUpperCase() + " de " + sym().label +
-      " conocidos hasta " + iso(clock).slice(0, 16) + " UTC: " + known.length +
-      " (" + alive + " vivos)" +
-      " · en la tabla, los de la ventana que se está mirando y los que siguen vivos" +
-      " · un rango existe desde que CIERRA su vela de confirmación, no desde que abre";
-    if (shown === CRT_MAX_ROWS) {
-      text += " · sólo se listan los " + CRT_MAX_ROWS + " más recientes";
-    }
-    if (!state.crtResolved) {
-      text += " · los resueltos están ocultos";
-    }
-    return text + " · los detecta el motor: no los ha dibujado ninguna mano";
-  }
-
-  /* Qué se está viendo de la capa calculada, para el estado de abajo. */
-  function crtCaption(range) {
-    if (blindfolded()) {
-      return "la venda tapa también los RANGOS CRT: con el gráfico pelado marcas lo que " +
-        "veas y luego revelas";
-    }
-    if (!crtTimeframe()) { return null; }
-    if (!crtOnChart()) {
-      return "rangos CRT de " + crtLabel() + ": se dibujan sólo sobre ese gráfico, que es " +
-        "donde se detectan; aquí se ven el sesgo y la tabla";
-    }
-    var clock = crtClock(range);
-    var visible = crtVisible(range);
-    var drawn = Math.min(visible.length, CRT_MAX_DRAWN);
-    var text = "RANGOS CRT (los calcula el motor, no tu mano): " + drawn +
-      " dibujados de " + crtKnown(clock).length + " conocidos" +
-      (visible.length > drawn
-        ? " · " + (visible.length - drawn) + " más caen en la ventana y no se pintan " +
-          "para no ahogar el dibujo"
-        : "") +
-      " · " + (CRT.description || "") +
-      " · continuo = vivo, punteado = resuelto";
-    if (!state.crtResolved) {
-      text += " · los resueltos están ocultos";
-    }
-    return text;
-  }
-
-  /* --- El ENFOQUE de H4: la segunda capa calculada ---------------------------
-   *
-   * El sesgo diario dice HACIA DÓNDE va el precio; H4 dice CUÁNDO va enfocado
-   * hacia ahí. El cruce de los dos lo hace el motor —`domain/crt/alignment`— y
-   * llega en el payload como una LÍNEA DE ESTADOS: una fila por cada CIERRE de
-   * vela H4, con el estado, el rango diario que da el sesgo y el rango H4 que
-   * enfoca o que bloquea. Aquí no se cruza nada: se elige qué tramo se pinta y
-   * de qué color.
-   *
-   * El reloj es el mismo que el de los rangos: una fila de la línea de estados
-   * no existe hasta que su vela H4 ha CERRADO, así que la vela en formación no
-   * cambia el estado ni puede pintar un tramo de fondo. Eso sale gratis de que
-   * la línea esté indexada por cierres y de que sólo se lean los anteriores al
-   * reloj.
-   *
-   * Sobre el gráfico de H4 conviven las dos temporalidades y hay que poder
-   * decir cuál es cuál: el CONTEXTO diario va en azul —las dos líneas del rango
-   * que da el sesgo y su objetivo—, y los rangos H4 en el verde y el rojo de
-   * siempre. Los que el filtro horario deja fuera van en gris: existen, se han
-   * detectado igual, pero no cuentan para alinear. */
-
-  //: Tope de tramos de fondo dibujados a la vez, por lo mismo que el de rangos:
-  //: con ocho años a la vista son miles de rectángulos.
-  var H4_MAX_BANDS = 400;
-
-  //: Tope de filas de la tabla de H4.
-  var H4_MAX_ROWS = 200;
-
-  function h4Timeframe() { return H4.timeframe || null; }
-
-  /* Si el gráfico abierto es el de H4, que es donde vive esta capa. */
-  function h4OnChart() { return h4Timeframe() !== null && state.chart === h4Timeframe(); }
-
-  function h4Ranges() { return sym().h4Ranges || []; }
-
-  /* La línea de estados de este par: columnas paralelas indexadas por el CIERRE
-   * de cada vela H4. */
-  function stateLine() {
-    var line = sym().states;
-    return line && line.t && line.t.length ? line : null;
-  }
-
-  /* Los rangos por número, para poder ir del estado al rango que lo produjo sin
-   * recorrer el array en cada dibujo. Se guarda por par: cambiar de par cambia
-   * los dos catálogos. */
-  var rangeIndex = {};
-
-  function indexed(kind) {
-    var key = sym().id + "/" + kind;
-    if (!rangeIndex[key]) {
-      var map = {};
-      (kind === "h4" ? h4Ranges() : crtRanges()).forEach(function (item) {
-        map[item.id] = item;
-      });
-      rangeIndex[key] = map;
-    }
-    return rangeIndex[key];
-  }
-
-  /* La fila vigente a esa hora: la de la última vela H4 que ya había cerrado.
-   * -1 mientras no haya cerrado ninguna. */
-  function stateIndexAt(clock) {
-    var line = stateLine();
-    if (!line) { return -1; }
-    return lowerBound(line.t, clock + 1) - 1;
-  }
-
-  function stateAt(clock) {
-    var line = stateLine();
-    var position = stateIndexAt(clock);
-    if (position < 0) { return null; }
-    return {
-      at: line.t[position],
-      state: H4.states[line.s[position]],
-      d1: line.d1[position],
-      target: line.target[position],
-      focus: line.focus[position],
-      block: line.block[position]
-    };
-  }
-
-  function stateLabel(name) { return (H4.labels && H4.labels[name]) || name; }
-
-  function stateColor(name) { return (H4.colors && H4.colors[name]) || null; }
-
-  /* Los tramos de fondo: filas consecutivas con el mismo estado, unidas. El
-   * último llega hasta el reloj y ni un minuto más. */
-  function stateBands(range) {
-    var line = stateLine();
-    if (!line) { return []; }
-    var clock = crtClock(range);
-    var last = stateIndexAt(clock);
-    if (last < 0) { return []; }
-    var first = Math.max(0, lowerBound(line.t, range.lo) - 1);
-    var bands = [], current = null;
-    for (var position = first; position <= last; position++) {
-      var name = H4.states[line.s[position]];
-      var to = position < last ? line.t[position + 1] : clock;
-      if (current && current.state === name) { current.to = to; continue; }
-      current = { state: name, from: line.t[position], to: to };
-      bands.push(current);
-    }
-    return bands.filter(function (band) {
-      return band.to > band.from && stateColor(band.state);
-    }).slice(-H4_MAX_BANDS);
-  }
-
-  /* El rango diario que manda AL RELOJ, con lo que hace falta para dibujarlo de
-   * contexto encima de H4. Es uno solo —el que da el sesgo—, no todos los de la
-   * ventana: lo que se quiere ver es contra qué techo y qué suelo está jugando
-   * la vela de cuatro horas que se está mirando. */
-  function d1Context(range) {
-    var row = stateAt(crtClock(range));
-    if (!row || row.d1 === null) { return null; }
-    var item = indexed("d1")[row.d1];
-    return item ? item : null;
-  }
-
-  /* Los rangos H4 que se sabían a esa hora, con el mismo criterio de siempre. */
-  function h4Known(clock) {
-    return h4Ranges().filter(function (item) { return item.known <= clock; });
-  }
-
-  function h4Visible(range) {
-    var clock = crtClock(range);
-    return h4Known(clock).filter(function (item) {
-      if (!state.crtResolved && !crtAlive(item, clock)) { return false; }
-      return crtEnd(item, clock) >= range.lo && item.ref <= range.hi;
-    });
-  }
-
-  function h4Drawn(range) {
-    var visible = h4Visible(range);
-    return visible.slice(Math.max(0, visible.length - CRT_MAX_DRAWN));
-  }
-
-  function h4Color(item) {
-    // Gris el que el filtro horario deja fuera: se ha detectado igual, pero no
-    // puede alinear, y pintarlo del color de los que sí cuentan sería mentir.
-    return item.ignored ? COLORS.muted : crtColor(item);
-  }
-
-  /* Todo lo que esta capa pone en `shapes`, en orden de abajo arriba: primero
-   * el fondo por estado, luego el contexto diario y encima los rangos H4. */
-  function h4Shapes(range) {
-    if (!h4OnChart() || blindfolded()) { return []; }
-    return bandShapes(range).concat(contextShapes(range)).concat(h4RangeShapes(range));
-  }
-
-  /* El fondo: verde muy suave cuando el sistema busca a favor, rojo cuando está
-   * bloqueado, amarillo mientras espera, y NADA sin sesgo. Sin sesgo no pasa
-   * nada, y teñir el gráfico entero diría lo contrario. */
-  function bandShapes(range) {
-    return stateBands(range).map(function (band, position) {
-      return {
-        type: "rect", name: "crt-h4-estado-" + position, xref: "x", yref: "paper",
-        x0: iso(band.from), x1: iso(band.to), y0: 0, y1: 1,
-        fillcolor: rgba(stateColor(band.state), 0.07),
-        line: { width: 0 },
-        layer: "below"
-      };
-    });
-  }
-
-  /* El contexto diario: el techo y el suelo del rango que da el sesgo, y su
-   * objetivo. En azul, que no es ni el verde ni el rojo de los rangos H4. */
-  function contextShapes(range) {
-    var item = d1Context(range);
-    if (!item) { return []; }
-    var clock = crtClock(range);
-    var x0 = iso(Math.max(item.ref, range.lo));
-    var x1 = iso(Math.min(crtEnd(item, clock), clock));
-    var linea = function (name, value, dash, text, position) {
-      return {
-        type: "line", name: name, xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: value, y1: value,
-        line: { color: rgba(CONTEXT_COLOR, dash === "dash" ? 0.95 : 0.6), width: 1.4, dash: dash },
-        layer: "below",
-        label: { text: text, textposition: position, font: { size: 10, color: CONTEXT_COLOR } }
-      };
-    };
-    return [
-      linea("crt-h4-d1-high", item.high, "solid", "", "top left"),
-      linea("crt-h4-d1-low", item.low, "solid", "", "bottom left"),
-      linea("crt-h4-d1-tp", item.target, "dash", CRT.tp || "TP D1",
-        item.up ? "top right" : "bottom right")
-    ];
-  }
-
-  /* Los rangos H4, con el mismo trazo que los diarios: continuo si están vivos,
-   * punteado y tenue si ya se resolvieron. */
-  function h4RangeShapes(range) {
-    var clock = crtClock(range);
-    var shapes = [];
-    h4Drawn(range).forEach(function (item) {
-      var alive = crtAlive(item, clock);
-      var color = h4Color(item);
-      var x0 = iso(item.ref);
-      var x1 = iso(crtEnd(item, clock));
-      shapes.push({
-        type: "rect", name: "crt-h4-rango-" + item.id, xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: item.low, y1: item.high,
-        fillcolor: rgba(color, alive ? 0.13 : 0.05),
-        line: {
-          color: rgba(color, alive ? 0.85 : 0.3),
-          width: alive ? 1.6 : 1,
-          dash: alive ? "solid" : "dot"
-        },
-        layer: "below",
-        // FUERA del rectángulo: encima del techo si el rango es alcista, debajo
-        // del suelo si es bajista. Los rectángulos de H4 son pequeños y la
-        // etiqueta dentro se comía las velas; el `yanchor` contrario a la
-        // posición es lo que la empuja al otro lado del borde.
-        label: alive
-          ? {
-            text: "CRT H4 " + item.id + " " + item.dir + (item.ignored ? " (fuera de hora)" : ""),
-            textposition: item.up ? "top left" : "bottom left",
-            yanchor: item.up ? "bottom" : "top",
-            font: { size: 10, color: color }
-          }
-          : { text: "" }
-      });
-      shapes.push({
-        type: "line", name: "crt-h4-tp-" + item.id, xref: "x", yref: "y",
-        x0: x0, x1: x1, y0: item.target, y1: item.target,
-        line: { color: rgba(color, alive ? 0.9 : 0.3), width: alive ? 1.4 : 1, dash: "dash" },
-        layer: "below",
-        label: alive
-          ? {
-            text: H4.tp || "TP H4",
-            textposition: item.up ? "top right" : "bottom right",
-            font: { size: 10, color: color }
-          }
-          : { text: "" }
-      });
-    });
-    return shapes;
-  }
-
-  /* La mecha de manipulación de los rangos H4, en una sola traza de puntos. */
-  function h4Traces(range) {
-    if (!h4OnChart() || blindfolded()) { return []; }
-    var clock = crtClock(range);
-    var x = [], y = [], symbols = [], colors = [], text = [];
-    h4Drawn(range).forEach(function (item) {
-      x.push(iso(item.confirm));
-      y.push(item.manip);
-      symbols.push(item.up ? "triangle-down" : "triangle-up");
-      colors.push(rgba(h4Color(item), crtAlive(item, clock) ? 0.95 : 0.35));
-      text.push(h4Hover(item, clock));
-    });
-    if (!x.length) { return []; }
-    return [{
-      type: "scatter", mode: "markers",
-      name: "Rangos CRT " + (H4.label || "H4") + " · manipulación (motor)",
-      x: x, y: y,
-      marker: { symbol: symbols, size: 9, color: colors, line: { width: 0 } },
-      text: text, hoverinfo: "text", hoverlabel: { align: "left" }
-    }];
-  }
-
-  function h4Hover(item, clock) {
-    var estado = crtStatus(item, clock);
-    return "RANGO CRT H4 nº " + item.id + " · " + item.dir.toUpperCase() +
-      " · calculado por el motor" +
-      "<br>referencia " + iso(item.ref).slice(0, 16) +
-      "<br>vela confirma: abre " + iso(item.confirm).slice(0, 16) +
-      " UTC (" + (item.open || "?") + " " + ANCHOR_LABEL + ")" +
-      " · cierra " + iso(item.known).slice(0, 16) +
-      " UTC (" + anchorTime(item.known) + " " + ANCHOR_LABEL + ")" +
-      " — existe desde ese cierre" +
-      "<br>rango [" + price(item.low) + ", " + price(item.high) + "] · " +
-      pips(item.size) + " pips" +
-      (item.sizeAtr === null ? "" : " · " + decimal(item.sizeAtr) + " ATR") +
-      "<br>objetivo " + price(item.target) + " · invalidación " + price(item.invalidation) +
-      "<br>estado " + estado.toUpperCase() +
-      (crtAlive(item, clock)
-        ? ""
-        : " el " + iso(item.resolved).slice(0, 16) + " (" + item.candles + " velas)") +
-      "<br>alineado con D1: " + alignedText(item) +
-      (item.ignored ? "<br>el filtro horario lo deja fuera: no cuenta para alinear" : "");
-  }
-
-  function alignedText(item) {
-    if (item.aligned === true) { return "sí"; }
-    if (item.aligned === false) { return "no (bloqueó)"; }
-    return "—";
-  }
-
-  /* --- El estado, bajo el precio ---------------------------------------------- */
-
-  function syncH4Panel(range) {
-    var panel = document.getElementById("h4-state");
-    if (!panel) { return; }
-    if (blindfolded()) {
-      panel.textContent = "| H4: TAPADO";
-      return;
-    }
-    var row = stateAt(crtClock(range));
-    if (!row) {
-      panel.textContent = "| H4: todavía no ha cerrado ninguna vela H4";
-      return;
-    }
-    panel.textContent = "| H4: " + stateLabel(row.state) + h4PanelDetail(row);
-  }
-
-  /* Qué rango explica el estado. Se lee del NÚMERO que trae la fila y no del
-   * nombre del estado: el vocabulario lo pone el motor, y el explorador lo
-   * enseña sin tener que conocerlo. */
-  function h4PanelDetail(row) {
-    var catalog = indexed("h4");
-    if (row.focus !== null) {
-      var focus = catalog[row.focus];
-      return " (rango #" + row.focus + (focus ? " " + focus.dir : "") + ")";
-    }
-    if (row.block !== null) {
-      var block = catalog[row.block];
-      return " (rango #" + row.block + (block ? " " + block.dir : "") +
-        (block ? ", " + (H4.tp || "TP H4") + " " + priceText(block.target) : "") +
-        ") → bloqueado";
-    }
-    if (row.d1 !== null) { return " (ningún rango H4 vivo: esperando)"; }
-    return " (ningún rango diario vivo: no hay hacia dónde ir)";
-  }
-
-  /* --- El estado H4 de cada día, sobre el gráfico diario ------------------------
-   *
-   * Una marca pequeña bajo cada vela diaria con el estado en que quedó ese día:
-   * el de su ÚLTIMA vela H4 cerrada. Sirve para recorrer varios días seguidos y
-   * ver de un vistazo cuándo el sistema estaba buscando y cuándo bloqueado, sin
-   * tener que abrir H4 día por día. */
-  function dailyStateTraces(cut, range) {
-    if (!crtOnChart() || blindfolded() || !stateLine()) { return []; }
-    var b = bars();
-    var clock = crtClock(range);
-    var step = span(state.chart);
-    var low = Infinity, high = -Infinity;
-    for (var i = cut.start; i < cut.end; i++) {
-      if (b.l[i] < low) { low = b.l[i]; }
-      if (b.h[i] > high) { high = b.h[i]; }
-    }
-    if (!isFinite(low)) { return []; }
-    var pad = (high - low) * 0.035 || pip();
-    var x = [], y = [], colors = [], text = [];
-    for (var j = cut.start; j < cut.end; j++) {
-      var row = stateAt(Math.min(b.t[j] + step, clock));
-      if (!row || row.at <= b.t[j]) { continue; }
-      x.push(iso(b.t[j]));
-      y.push(b.l[j] - pad);
-      colors.push(rgba(stateColor(row.state) || COLORS.muted, 0.85));
-      text.push("ESTADO H4 al cerrar el " + dayOf(b.t[j]) + ": " + stateLabel(row.state) +
-        "<br>última vela H4 cerrada " + iso(row.at).slice(0, 16) +
-        "<br>lo calcula el motor cruzando el sesgo diario con los rangos de H4");
-    }
-    if (!x.length) { return []; }
-    return [{
-      type: "scatter", mode: "markers", name: "Estado H4 del día (motor)",
-      x: x, y: y,
-      marker: { symbol: "square", size: 7, color: colors, line: { width: 0 } },
-      text: text, hoverinfo: "text", hoverlabel: { align: "left" }
-    }];
-  }
-
-  /* --- La tabla de rangos H4 ------------------------------------------------------ */
-
-  var H4_HEADERS = [
-    "nº", "dirección",
-    "vela confirma abre (UTC)", "abre (" + ANCHOR_LABEL + ")",
-    "vela confirma cierra (UTC)", "cierra (" + ANCHOR_LABEL + ")",
-    "rango", "manipulación",
-    "objetivo", "tamaño", "estado", "resuelto (UTC)", "velas", "alineado con D1"
-  ];
-
-  function h4TableRows(range) {
-    if (blindfolded()) { return []; }
-    var clock = crtClock(range);
-    var visible = h4Visible(range).slice();
-    visible.reverse();
-    return visible.slice(0, H4_MAX_ROWS).map(function (item) {
-      var estado = crtStatus(item, clock);
-      var vivo = crtAlive(item, clock);
-      return [
-        String(item.id),
-        item.dir,
-        iso(item.confirm).slice(0, 16),
-        (item.open || "—") + (item.ignored ? " (fuera)" : ""),
-        iso(item.known).slice(0, 16),
-        anchorTime(item.known),
-        price(item.low) + " – " + price(item.high),
-        price(item.manip),
-        price(item.target),
-        pips(item.size) + " pips" +
-          (item.sizeAtr === null ? "" : " · " + decimal(item.sizeAtr) + " ATR"),
-        estado + (item.ambiguous && !vivo ? " (misma vela)" : ""),
-        vivo ? "—" : iso(item.resolved).slice(0, 16),
-        vivo ? "—" : String(item.candles),
-        alignedText(item)
-      ];
-    });
-  }
-
-  function renderH4Table(range) {
-    var wrap = document.getElementById("h4-table-wrap");
-    var host = document.getElementById("h4-table");
-    var caption = document.getElementById("h4-table-caption");
-    if (!wrap || !host || !caption) { return; }
-    // La tabla de H4 acompaña al gráfico de H4: en el diario la que se lee es la
-    // de los rangos diarios, y dos tablas a la vez no se leen.
-    wrap.style.display = h4OnChart() ? "" : "none";
-    if (!h4OnChart()) { return; }
-    host.innerHTML = "";
-    var table = document.createElement("table");
-    var head = document.createElement("thead");
-    head.appendChild(crtRow(H4_HEADERS, "th"));
-    table.appendChild(head);
-
-    var body = document.createElement("tbody");
-    var rows = h4TableRows(range);
-    if (!rows.length) {
-      var empty = document.createElement("tr");
-      var cell = crtCell("td", h4EmptyReason(range), "empty");
-      cell.setAttribute("colspan", String(H4_HEADERS.length));
-      empty.appendChild(cell);
-      body.appendChild(empty);
-    } else {
-      rows.forEach(function (cells) { body.appendChild(crtRow(cells)); });
-    }
-    table.appendChild(body);
-    host.appendChild(table);
-    caption.textContent = h4TableCaption(range, rows.length);
-  }
-
-  function h4EmptyReason(range) {
-    if (blindfolded()) {
-      return "la auditoría ciega tapa la capa calculada: pulsa Revelar para ver los rangos";
-    }
-    if (!h4Ranges().length) {
-      return "no hay ningún rango H4 calculado para " + sym().label;
-    }
-    if (!h4Known(crtClock(range)).length) {
-      return "todavía no se había confirmado ningún rango H4 a " +
-        iso(crtClock(range)).slice(0, 16) + " UTC";
-    }
-    return "ningún rango H4 conocido cruza este tramo" +
-      (state.crtResolved ? "" : " (los resueltos están ocultos)");
-  }
-
-  function h4TableCaption(range, shown) {
-    var clock = crtClock(range);
-    var known = h4Known(clock);
-    var alive = known.filter(function (item) { return crtAlive(item, clock); }).length;
-    var text = "RANGOS CRT DE H4 de " + sym().label + " conocidos hasta " +
-      iso(clock).slice(0, 16) + " UTC: " + known.length + " (" + alive + " vivos)" +
-      " · «alineado con D1» dice si ese rango llegó a poner el sistema a favor del " +
-      "sesgo diario, si fue el que lo bloqueó, o si nunca llegó a mandar" +
-      " · un rango existe desde que CIERRA su vela de confirmación, no desde que abre";
-    if (shown === H4_MAX_ROWS) {
-      text += " · sólo se listan los " + H4_MAX_ROWS + " más recientes";
-    }
-    if (H4.filtered) { text += " · " + H4.timeFilter; }
-    return text + " · los detecta el motor: no los ha dibujado ninguna mano";
-  }
-
-  /* Qué se está viendo de la capa de enfoque, para el estado de abajo. */
-  function h4Caption(range) {
-    if (!h4Timeframe() || blindfolded()) { return null; }
-    var row = stateAt(crtClock(range));
-    var estado = row ? stateLabel(row.state) : "todavía sin ninguna vela H4 cerrada";
-    if (!h4OnChart()) {
-      return "ALINEACIÓN H4 (" + H4.modeLabel + "): " + estado +
-        " · el fondo por estado y los rangos H4 se dibujan sobre el gráfico H4, que es " +
-        "donde se detectan";
-    }
-    var bands = stateBands(range);
-    var visible = h4Visible(range);
-    var drawn = Math.min(visible.length, CRT_MAX_DRAWN);
-    return "ALINEACIÓN H4 (los calcula el motor, no tu mano): " + estado +
-      " · " + drawn + " rangos H4 dibujados de " + h4Known(crtClock(range)).length +
-      " conocidos · " + bands.length + " tramos de fondo" +
-      (bands.length === H4_MAX_BANDS ? " (sólo los más recientes)" : "") +
-      " · el azul es el CONTEXTO diario: el rango que da el sesgo y su TP" +
-      " · " + H4.modeLabel + " · " + H4.timeFilter;
-  }
-
   // --- Figura -------------------------------------------------------------------
 
   /* Las tres formas de la caja simulada. Se apunta dónde empiezan: es lo que
@@ -2969,10 +2088,7 @@
       dragmode: "pan",
       showlegend: true,
       legend: { orientation: "h", y: 1.04, x: 0, font: { size: 11 } },
-      // Abajo del todo lo que calcula el motor y encima lo que marca la mano:
-      // así una zona dibujada a mano nunca queda tapada por un rectángulo que
-      // no ha puesto nadie.
-      shapes: lineShapes_(rectShapes_(simShapes_(crtShapes(range).concat(h4Shapes(range))))),
+      shapes: lineShapes_(rectShapes_(simShapes_([]))),
       xaxis: {
         type: "date", gridcolor: COLORS.grid, rangeslider: { visible: false },
         // El rango va siempre con su `autorange`: si se diera uno sin apagar el
@@ -2997,10 +2113,7 @@
     var range = bounds();
     var cut = slice(range);
 
-    var calculadas = crtTraces(range)
-      .concat(h4Traces(range))
-      .concat(dailyStateTraces(cut, range));
-    Plotly.react("chart", priceTraces(cut).concat(calculadas), layout(range), {
+    Plotly.react("chart", priceTraces(cut), layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
       // Sin las herramientas de dibujo de Plotly: lo que se marca a mano son la
       // caja, los recuadros y las líneas de este explorador, que se numeran, se
@@ -3012,12 +2125,6 @@
     });
     bindZoom();
     syncControls(range);
-    // El sesgo y la tabla se rehacen con el mismo reloj que el dibujo: si
-    // dijeran una hora distinta de la que se está viendo, no servirían.
-    syncCrtPanel(range);
-    syncH4Panel(range);
-    renderCrtTable(range);
-    renderH4Table(range);
     document.getElementById("notes").textContent = notes(range, cut);
   }
 
@@ -3033,16 +2140,12 @@
     var cuenta = accountCaption();
     var recuadros = rectCaption();
     var lineas = lineCaption();
-    var rangos = crtCaption(range);
-    var enfoque = h4Caption(range);
 
     if (blindfolded()) {
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + sym().label + " · " +
         label(state.chart) + " · " + range.from + " → " + range.to + " · " +
         visible.toLocaleString("es-ES") + " velas. Marca lo que veas y pulsa Revelar. " +
         "Sorteada dentro de " + state.scope.from + " → " + state.scope.to + "." +
-        (rangos ? " · " + rangos : "") +
-        (enfoque ? " · " + enfoque : "") +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
         (lineas ? " · " + lineas : "") +
@@ -3071,13 +2174,12 @@
     if (state.zoom.x || state.zoom.y) {
       text += " · encuadre manual: el zoom se mantiene entre pasos (Ajustar para soltarlo)";
     }
-    // Qué parte de lo que se ve la ha calculado el motor y qué parte la ha
-    // puesto una mano. Un rectángulo encima del precio no dice por sí solo
-    // quién lo dibujó, y de eso depende cómo se lee el gráfico entero.
-    text += " · LO QUE CALCULA EL MOTOR SON LOS RANGOS CRT DE " +
-      crtLabel().toUpperCase() + " Y DE " + (H4.label || "H4").toUpperCase() +
-      " Y LA ALINEACIÓN ENTRE LOS DOS, Y NADA MÁS: no hay señales, ni entradas, ni " +
-      "gestión. Todo lo demás que se dibuje encima del precio lo pones tú";
+    // Lo que este explorador NO dibuja. Con el gráfico pelado, la ausencia de
+    // marcas se lee como que ahí no pasó nada, y lo que pasa es que todavía no
+    // hay quien lo calcule: eso hay que decirlo, no dejarlo suponer.
+    text += " · SIN ESTRATEGIA: aquí no hay ni una capa calculada —ni estructura, " +
+      "ni zonas, ni señales, ni entradas—. Lo único que se dibuja encima del " +
+      "precio lo pone tu mano";
     if (sym().skipped && sym().skipped.length) {
       text += " · temporalidades sin velas en " + sym().label + ": " +
         sym().skipped.join(" · ");
@@ -3103,8 +2205,6 @@
     if (state.blind && state.revealed) {
       text += " · revelado de la ventana ciega con semilla " + state.seed;
     }
-    if (rangos) { text += " · " + rangos; }
-    if (enfoque) { text += " · " + enfoque; }
     if (simulada) { text += " · " + simulada; }
     if (recuadros) { text += " · " + recuadros; }
     if (lineas) { text += " · " + lineas; }
@@ -3441,11 +2541,6 @@
     // Sólo hay algo que soltar si el encuadre está tomado a mano.
     document.getElementById("zoom-reset").disabled = !state.zoom.x && !state.zoom.y;
 
-    // Los rangos calculados: sin ninguno para este par no hay nada que filtrar.
-    var resueltos = document.getElementById("crt-resolved");
-    resueltos.checked = state.crtResolved;
-    resueltos.disabled = !crtRanges().length;
-
     document.querySelectorAll("#sim-buttons button").forEach(function (button) {
       button.setAttribute("aria-pressed", String(button.dataset.side === state.arming));
     });
@@ -3533,12 +2628,6 @@
         dropZoom();
         draw();
       });
-    });
-    // Enseñar u ocultar los rangos ya resueltos. NO recalcula nada: los rangos
-    // llegan hechos y esto sólo elige cuáles se pintan.
-    document.getElementById("crt-resolved").addEventListener("change", function (event) {
-      state.crtResolved = event.target.checked;
-      draw();
     });
     seedInput().addEventListener("change", function () { state.seedTyped = true; });
     document.getElementById("blind-start").addEventListener("click", function () {

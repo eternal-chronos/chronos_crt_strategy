@@ -37,9 +37,13 @@ class SymbolSchema(_Strict):
     #: Cifras con las que se DIBUJA el precio, y de las que sale el pip.
     decimals: int = Field(default=5, ge=0, le=8)
     label: str = ""
+    #: Gráficos de este par. Vacío = los `timeframes` generales.
+    timeframes: list[str] = Field(default_factory=list)
 
     def to_domain(self) -> SymbolConfig:
-        return SymbolConfig(**self.model_dump())
+        values = self.model_dump()
+        values["timeframes"] = tuple(self.timeframes)
+        return SymbolConfig(**values)
 
 
 class AggregationSchema(_Strict):

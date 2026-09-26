@@ -59,8 +59,6 @@ function declare(id) {
  'tf-buttons', 'view-buttons', 'preset-buttons', 'chart', 'zoom-reset',
  'prev', 'next', 'from', 'to',
  'blind-seed', 'blind-start', 'blind-reveal', 'blind-exit',
- 'crt-group', 'crt-resolved', 'crt-bias', 'crt-bias-note', 'crt-table', 'crt-table-caption',
- 'h4-state', 'h4-table-wrap', 'h4-table', 'h4-table-caption',
  'sim-group', 'sim-buttons', 'sim-rr', 'sim-clear',
  'rect-group', 'rect-buttons', 'rect-undo', 'rect-clear',
  'line-group', 'line-buttons', 'line-undo', 'line-clear',
@@ -100,11 +98,7 @@ global.document = {
     if (!elements[id]) { missing.push(id); declare(id); }
     return elements[id];
   },
-  createElement(tag) {
-    const element = makeElement('created');
-    element.tagName = String(tag).toUpperCase();
-    return element;
-  },
+  createElement() { return makeElement('created'); },
   createTextNode(text) { return { text: text }; },
   addEventListener(type, handler) {
     (documentListeners[type] = documentListeners[type] || []).push(handler);
@@ -135,9 +129,9 @@ function pressKey(key, focusedTag) {
   global.document.activeElement = null;
 }
 
-/* Las trazas de PRECIO: velas, cierres y la vela en formación. Cualquier otra
- * es una capa calculada, y el test dice cuál se admite: hoy, la de los rangos
- * CRT y ninguna más. */
+/* Lo que NO ha puesto una mano. Hoy son las velas y la vela en formación, y
+ * nada más: si algún día aparece una traza que no sea ninguna de las dos, este
+ * explorador habrá empezado a dibujar algo calculado y el test lo dirá. */
 function priceLayer(name) {
   return /^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
@@ -158,26 +152,8 @@ function handDrawn(shape) {
   return simShape(shape) || rectShape(shape) || lineShape(shape);
 }
 
-/* Lo que dibuja el MOTOR: los rangos CRT. Va aparte de lo de la mano a
- * propósito, porque de eso depende cómo se lee el gráfico.
- *
- * Son dos capas y se leen por separado: los rangos de la temporalidad del sesgo
- * (`crt-…`) y todo lo del ENFOQUE de H4 (`crt-h4-…`), que son los rangos H4, el
- * contexto diario en azul y el fondo por estado. */
-function h4Shape(shape) {
-  return String(shape.name || '').indexOf('crt-h4-') === 0;
-}
-
-function crtShape(shape) {
-  return String(shape.name || '').indexOf('crt-') === 0 && !h4Shape(shape);
-}
-
-function engineDrawn(shape) {
-  return crtShape(shape) || h4Shape(shape);
-}
-
-/* El punto más a la derecha de todo lo que NO ha dibujado una mano —velas y
- * rangos CRT—. En el replay nada de eso puede caer más allá del reloj. */
+/* El punto más a la derecha de todo lo que NO ha dibujado una mano. En el
+ * replay nada de eso puede caer más allá del reloj. */
 function furthest(traces, layout) {
   const points = [];
   traces.forEach(function (trace) {
@@ -187,23 +163,6 @@ function furthest(traces, layout) {
     if (!handDrawn(shape)) { points.push(shape.x1); }
   });
   return points.length ? points.sort()[points.length - 1] : null;
-}
-
-function engineShape(shape) {
-  return {
-    name: shape.name, type: shape.type,
-    x0: shape.x0, x1: shape.x1, y0: shape.y0, y1: shape.y1,
-    xref: shape.xref || null, yref: shape.yref || null,
-    color: (shape.line && shape.line.color) || null,
-    dash: (shape.line && shape.line.dash) || null,
-    fillcolor: shape.fillcolor || null,
-    label: (shape.label && shape.label.text) || null,
-    // Dónde cae el texto respecto del borde: `textposition` lo pega a un lado y
-    // `yanchor` decide si queda dentro o fuera del rectángulo.
-    textposition: (shape.label && shape.label.textposition) || null,
-    yanchor: (shape.label && shape.label.yanchor) || null,
-    layer: shape.layer || null,
-  };
 }
 
 const relayoutCalls = [];
@@ -220,8 +179,7 @@ global.Plotly = {
     plotCalls.push({
       maxX: furthest(traces, layout),
       target: target,
-      // Las trazas que no son precio: la capa calculada. El test comprueba
-      // cuáles son, no que no haya ninguna.
+      // Ninguna traza puede ser otra cosa que precio mientras no haya estrategia.
       calculated: traces.filter(function (trace) { return !priceLayer(trace.name); })
         .map(function (trace) { return trace.name; }),
       traces: traces.map(function (trace) {
@@ -237,13 +195,11 @@ global.Plotly = {
       firstBar: traces[0] && traces[0].x && traces[0].x[0],
       lastBar: traces[0] && traces[0].x && traces[0].x[traces[0].x.length - 1],
       hover: traces[0] && traces[0].text && traces[0].text[0],
-      // Todo lo que hay en `shapes` lo ha puesto una mano o es un rango CRT: si
-      // aparece ahí cualquier otra cosa, este recuento deja de ser cero.
+      // Todo lo que hay en `shapes` lo ha puesto una mano: si algún día aparece
+      // ahí algo que no lo sea, este recuento deja de ser cero.
       shapes: (layout.shapes || []).filter(function (shape) {
-        return !handDrawn(shape) && !engineDrawn(shape);
+        return !handDrawn(shape);
       }).length,
-      crt: (layout.shapes || []).filter(crtShape).map(engineShape),
-      h4: (layout.shapes || []).filter(h4Shape).map(engineShape),
       sim: (layout.shapes || []).filter(simShape).map(function (shape) {
         return {
           name: shape.name, type: shape.type,
@@ -278,35 +234,6 @@ global.Plotly = {
   },
 };
 
-/* Los nodos de una etiqueta dentro de un árbol de elementos del stub. La tabla
- * de rangos se construye con createElement/appendChild, así que se puede leer
- * igual que la leería el navegador. */
-function collect(node, tag, out) {
-  (node.children || []).forEach(function (child) {
-    if (child.tagName === tag) { out.push(child); }
-    collect(child, tag, out);
-  });
-  return out;
-}
-
-function tableRows(id) {
-  return collect(elements[id], 'TR', []).map(function (row) {
-    return (row.children || []).map(function (cell) { return cell.textContent; });
-  });
-}
-
-function crtTableRows() { return tableRows('crt-table'); }
-
-/* Lo más a la derecha que llega un rango dibujado. En replay no puede pasar del
- * reloj: sería enseñar antes de tiempo algo que el motor todavía no sabía. */
-function furthestOf(kind) {
-  const shapes = (plotCalls[plotCalls.length - 1] || {})[kind] || [];
-  const edges = shapes.map(function (shape) { return shape.x1; }).sort();
-  return edges.length ? edges[edges.length - 1] : null;
-}
-
-function crtFurthest() { return furthestOf('crt'); }
-
 function pressed(container, key) {
   const found = elements[container].children.filter(function (button) {
     return button.getAttribute('aria-pressed') === 'true';
@@ -339,18 +266,6 @@ function snapshot(label) {
     rectArmed: pressed('rect-buttons', 'kind'),
     rectUndoDisabled: elements['rect-undo'].disabled === true,
     rectClearDisabled: elements['rect-clear'].disabled === true,
-    crtBias: elements['crt-bias'].textContent,
-    crtNote: elements['crt-bias-note'].textContent,
-    crtCaption: elements['crt-table-caption'].textContent,
-    crtRows: crtTableRows(),
-    crtMaxX: crtFurthest(),
-    h4State: elements['h4-state'].textContent,
-    h4Caption: elements['h4-table-caption'].textContent,
-    h4Rows: tableRows('h4-table'),
-    h4TableHidden: elements['h4-table-wrap'].style.display === 'none',
-    h4MaxX: furthestOf('h4'),
-    crtResolvedChecked: elements['crt-resolved'].checked === true,
-    crtResolvedDisabled: elements['crt-resolved'].disabled === true,
     lineArmed: pressed('line-buttons', 'kind'),
     lineUndoDisabled: elements['line-undo'].disabled === true,
     lineClearDisabled: elements['line-clear'].disabled === true,
@@ -456,73 +371,24 @@ Object.keys(payload.keys).forEach(function (timeframe) {
 pressKey(payload.keys[payload.symbols[0].charts[0]], 'INPUT');
 steps.push(snapshot('teclado-tf-en-un-campo'));
 
+// Un gráfico que sólo trae un par: al pasar al que no lo tiene se cae al
+// primero de los suyos, no a un gráfico vacío.
+const propio = payload.symbols[0].charts.find(function (tf) {
+  return payload.symbols[1] && payload.symbols[1].charts.indexOf(tf) < 0;
+});
+if (propio) {
+  selectSymbol(payload.symbols[0].id);
+  selectChart(propio);
+  steps.push(snapshot('grafico-propio-' + propio));
+  selectSymbol(payload.symbols[1].id);
+  steps.push(snapshot('grafico-propio-otro-par'));
+  selectSymbol(payload.symbols[0].id);
+}
+
 viewButtons[1].fire('click');
 steps.push(snapshot('lineas'));
 viewButtons[0].fire('click');
 steps.push(snapshot('velas'));
-
-// --- Los rangos CRT: la única capa que calcula el motor -----------------------
-//
-// Se dibujan sólo sobre su temporalidad, el sesgo y la tabla se ven en todas, y
-// en replay no puede aparecer nada que el motor no supiera todavía.
-const crtTf = payload.crt.timeframe;
-selectSymbol(payload.symbols[0].id);
-selectChart(crtTf);
-presets[0].fire('click');
-steps.push(snapshot('crt-en-su-temporalidad'));
-
-// Sin los resueltos quedan sólo los vivos, en el gráfico y en la tabla.
-elements['crt-resolved'].fire('change', { target: { checked: false } });
-steps.push(snapshot('crt-sin-resueltos'));
-elements['crt-resolved'].fire('change', { target: { checked: true } });
-
-// En una temporalidad sin capa calculada no se dibuja nada encima del precio;
-// el sesgo y la tabla siguen. Se elige la primera que no sea ni la del sesgo ni
-// la del enfoque: en ésas SÍ hay cosas dibujadas, y a propósito.
-const sinCapa = payload.symbols[0].charts.filter(function (tf) {
-  return tf !== crtTf && tf !== payload.h4.timeframe;
-})[0];
-selectChart(sinCapa);
-steps.push(snapshot('crt-en-otra-temporalidad'));
-selectChart(crtTf);
-
-// El replay: un rango no aparece hasta que su vela de confirmación ha cerrado.
-const crtSerie = payload.symbols[0].bars[crtTf].t;
-elements['replay-date'].value = new Date(crtSerie[Math.floor(crtSerie.length / 2)] * 60000)
-  .toISOString().slice(0, 10);
-elements['replay-start'].fire('click');
-steps.push(snapshot('crt-replay-inicio'));
-elements['replay-step'].fire('click');
-elements['replay-step'].fire('click');
-steps.push(snapshot('crt-replay-paso'));
-elements['replay-exit'].fire('click');
-
-// --- El ENFOQUE de H4: la segunda capa calculada ------------------------------
-//
-// Sobre H4 conviven tres cosas del motor: los rangos H4, el contexto diario en
-// azul y el fondo por estado. El estado se reevalúa al CERRAR cada vela H4, así
-// que en replay no puede adelantarse al reloj.
-const enfoqueTf = payload.h4.timeframe;
-selectChart(enfoqueTf);
-presets[0].fire('click');
-steps.push(snapshot('h4-en-su-temporalidad'));
-
-// Sobre el diario no se dibuja nada de H4 salvo la marca de estado del día, y
-// el panel sigue diciendo en qué estado está el sistema.
-selectChart(crtTf);
-steps.push(snapshot('h4-en-el-diario'));
-
-selectChart(enfoqueTf);
-const h4Serie = payload.symbols[0].bars[enfoqueTf].t;
-elements['replay-date'].value = new Date(h4Serie[Math.floor(h4Serie.length / 2)] * 60000)
-  .toISOString().slice(0, 10);
-elements['replay-start'].fire('click');
-steps.push(snapshot('h4-replay-inicio'));
-elements['replay-step'].fire('click');
-elements['replay-step'].fire('click');
-steps.push(snapshot('h4-replay-paso'));
-elements['replay-exit'].fire('click');
-selectChart(crtTf);
 
 // --- Replay -------------------------------------------------------------------
 const h4 = payload.symbols[0].charts.indexOf('H4') >= 0 ? 'H4' : payload.symbols[0].charts[0];
@@ -901,17 +767,6 @@ elements['blind-seed'].fire('change', {});
 elements['blind-start'].fire('click');
 steps.push(snapshot('ciega-repetida'));
 elements['blind-exit'].fire('click');
-
-// La venda tapa las DOS capas calculadas, no sólo la del sesgo.
-selectChart(enfoqueTf);
-elements['blind-seed'].value = '4242';
-elements['blind-seed'].fire('change', {});
-elements['blind-start'].fire('click');
-steps.push(snapshot('ciega-en-h4'));
-elements['blind-reveal'].fire('click');
-steps.push(snapshot('ciega-en-h4-revelada'));
-elements['blind-exit'].fire('click');
-selectChart(crtTf);
 
 console.log(JSON.stringify({
   unknownElements: missing,

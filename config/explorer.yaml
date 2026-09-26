@@ -22,6 +22,7 @@
 price_side: bid
 
 # Gráficos del explorador, de mayor a menor. El primero es el que abre.
+# Un par puede declarar los suyos con `timeframes` (el oro lleva también H12).
 # Un par cuyo histórico no dé para alguna de ellas se dibuja igual con las que sí
 # pueda: se avisa de cuál falta y por qué.
 timeframes: [D, H4, H1, M15]
@@ -41,6 +42,9 @@ symbols:
     start: null
     end: null
     decimals: 2
+    # Gráficos propios del oro: los generales más H12. Con el ancla de sesión,
+    # H12 parte el día en dos: abre a las 17:00 y a las 05:00 de Nueva York.
+    timeframes: [D, H12, H4, H1, M15]
 
   - symbol: EURUSD
     label: EURUSD

@@ -129,11 +129,16 @@ function pressKey(key, focusedTag) {
   global.document.activeElement = null;
 }
 
-/* Lo que NO ha puesto una mano. Hoy son las velas y la vela en formación, y
- * nada más: si algún día aparece una traza que no sea ninguna de las dos, este
- * explorador habrá empezado a dibujar algo calculado y el test lo dirá. */
+/* Lo que NO ha puesto una mano. Las velas y la vela en formación son precio;
+ * todo lo demás es calculado y se apunta con su nombre en `calculated`. Hoy la
+ * única capa calculada son los rangos CRT diarios: cualquier otra, el test la
+ * señala. */
 function priceLayer(name) {
   return /^(Velas |Cierres |Vela en formación)/.test(name || '');
+}
+
+function rangeLayer(name) {
+  return /^Rangos CRT diarios · (bajistas|alcistas)$/.test(name || '');
 }
 
 function simShape(shape) {
@@ -179,9 +184,23 @@ global.Plotly = {
     plotCalls.push({
       maxX: furthest(traces, layout),
       target: target,
-      // Ninguna traza puede ser otra cosa que precio mientras no haya estrategia.
+      // Todo lo que no es precio: lo ha calculado alguien.
       calculated: traces.filter(function (trace) { return !priceLayer(trace.name); })
         .map(function (trace) { return trace.name; }),
+      // Los rangos: cuántos rectángulos (cinco vértices y un corte cada uno) y
+      // el punto más a la derecha, que en replay no puede pasar del reloj.
+      ranges: traces.filter(function (trace) { return rangeLayer(trace.name); })
+        .map(function (trace) {
+          const xs = (trace.x || []).filter(function (value) { return value; });
+          return {
+            name: trace.name,
+            boxes: (trace.x || []).filter(function (value) { return value === null; }).length,
+            maxX: xs.length ? xs.slice().sort()[xs.length - 1] : null,
+            fill: trace.fill || null,
+            color: (trace.line && trace.line.color) || null,
+            caption: trace.text && trace.text[0],
+          };
+        }),
       traces: traces.map(function (trace) {
         return {
           name: trace.name,

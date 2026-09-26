@@ -6,11 +6,11 @@ el gráfico del proyecto al lado de las capturas de la plataforma del propietari
 y poder marcar encima.
 
 **No dibuja ninguna estrategia porque todavía no hay ninguna.** Lo que sale del
-payload son velas y nada más: cuatro pares, las temporalidades que la
-configuración pida y los nombres con los que el propietario marca a mano. El día
-que haya una capa calculada, se añade aquí y se enciende en el JavaScript; hasta
-entonces el explorador dice en cada dibujo que lo único que hay encima del precio
-lo ha puesto una mano.
+payload son velas —cuatro pares, las temporalidades que la configuración pida—,
+los nombres con los que el propietario marca a mano y UNA capa calculada: los
+rangos CRT del diario (`domain/crt/ranges.py`). Se calculan aquí y el
+JavaScript sólo los pinta; el explorador separa en leyenda y estado lo que sale
+del motor de lo que pone una mano.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
 los puntos se componen en JavaScript y las marcas de tiempo viajan como minutos
@@ -30,10 +30,13 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.chart.config import (
+    DAILY,
     TIMEFRAME_KEYS,
     TIMEFRAME_LABELS,
     MarksConfig,
 )
+from chronos.domain.crt.ranges import BULLISH as BULLISH_RANGE
+from chronos.domain.crt.ranges import crt_ranges
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.market.chart_run import ChartRun, SymbolBars
 from chronos.infrastructure.reporting import theme
@@ -53,6 +56,10 @@ BEARISH = theme.NEGATIVE
 #: haya capas calculadas, lo que se vea con estos tres colores seguirá siendo lo
 #: que ha puesto una mano.
 HAND_COLORS: tuple[str, ...] = (theme.MAGENTA, theme.CYAN, theme.OLIVE)
+
+#: Los rangos CRT diarios, la capa que calcula el motor: azul el alcista y
+#: naranja el bajista. Ni el verde y el rojo de las velas ni un tono de la mano.
+RANGE_COLORS: dict[str, str] = {"bullish": theme.SERIES[0], "bearish": theme.SERIES[1]}
 
 #: Minuto cero de la escala de tiempos del explorador.
 _EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
@@ -113,6 +120,7 @@ def build_payload(
             #: —punteado allí, continuo aquí—, no el color.
             "rects": hand_colors(config.marks.rects),
             "lines": hand_colors(config.marks.lines),
+            "ranges": dict(RANGE_COLORS),
         },
         "labels": dict(TIMEFRAME_LABELS),
         "keys": {
@@ -161,7 +169,41 @@ def _symbol_payload(item: SymbolBars, max_bars: int) -> dict[str, Any]:
         },
         #: Temporalidades que el histórico no daba para construir, con el motivo.
         "skipped": list(item.skipped),
+        #: Rangos CRT del diario, calculados sobre TODAS sus velas aunque el
+        #: payload las recorte: un rango no puede depender de cuántas se embeban.
+        "ranges": _ranges_payload(frames[DAILY]) if DAILY in frames else [],
     }
+
+
+def _ranges_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Cada rango con las ETIQUETAS de sus velas, en minutos desde la época.
+
+    Viajan etiquetas y no cierres: el navegador sabe cuándo cierra cada vela
+    (`t + span`), con la misma cuenta con la que mueve el reloj del replay.
+    """
+    ranges = crt_ranges(frame)
+    minutes = _epoch_minutes(pd.DatetimeIndex(frame.index))
+    return [
+        {
+            "dir": "bullish" if direction == BULLISH_RANGE else "bearish",
+            "ref": minutes[reference],
+            "confirm": minutes[confirmation],
+            "end": minutes[end] if end >= 0 else None,
+            "reason": reason or None,
+            "high": round(float(high), _PAYLOAD_DECIMALS),
+            "low": round(float(low), _PAYLOAD_DECIMALS),
+        }
+        for direction, reference, confirmation, end, reason, high, low in zip(
+            ranges["direction"].tolist(),
+            ranges["reference"].tolist(),
+            ranges["confirmation"].tolist(),
+            ranges["end"].tolist(),
+            ranges["end_reason"].tolist(),
+            ranges["high"].tolist(),
+            ranges["low"].tolist(),
+            strict=True,
+        )
+    ]
 
 
 # --- Velas ------------------------------------------------------------------
@@ -231,8 +273,8 @@ def _subtitle(run: ChartRun) -> str:
     faltan = f" · sin embeber: {', '.join(run.unavailable)}" if run.unavailable else ""
     return (
         f"{pares} · lado {config.price_side} · día desde "
-        f"{config.aggregation.describe_daily_start()} · sin estrategia: sólo velas y lo "
-        f"que marques a mano{faltan}"
+        f"{config.aggregation.describe_daily_start()} · sin estrategia: velas, rangos CRT "
+        f"diarios calculados y lo que marques a mano{faltan}"
     )
 
 

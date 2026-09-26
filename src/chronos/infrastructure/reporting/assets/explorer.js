@@ -1,9 +1,10 @@
 /* Explorador de velas multi-par.
  *
- * El chasis del gráfico y NADA MÁS: velas o cierres, cuatro temporalidades,
- * cuatro pares, ventana de fechas, zoom, replay y las herramientas con las que
- * el propietario marca a mano encima del precio. No dibuja ninguna capa
- * calculada porque todavía no hay ninguna estrategia que calcule nada.
+ * El chasis del gráfico: velas o cierres, cuatro temporalidades, cuatro pares,
+ * ventana de fechas, zoom, replay y las herramientas con las que el propietario
+ * marca a mano encima del precio. Encima, UNA capa calculada: los rangos CRT del
+ * diario, que llegan resueltos del motor y aquí sólo se pintan, con su propia
+ * traza, su entrada en la leyenda y su línea en el estado.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
  * con Plotly.react. Es más barato de razonar que llevar la cuenta de índices de
@@ -250,8 +251,8 @@
 
   /* Con la venda puesta no se dibuja nada más que las velas: es el punto de la
    * prueba —mirar el gráfico pelado antes de ver lo que marcaste— y por eso el
-   * apagón se hace en un único sitio. Hoy sólo alcanza a las marcas a mano
-   * porque no hay ninguna capa calculada; cuando la haya, se apaga aquí. */
+   * apagón se hace en un único sitio: alcanza a los rangos CRT calculados, que
+   * no se ven hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
   function blindfolded() { return state.blind && !state.revealed; }
 
   function rgba(hex, alpha) {
@@ -299,6 +300,90 @@
     }];
     if (half) { traces.push(formingTrace(half)); }
     return traces;
+  }
+
+  // --- Rangos CRT diarios (capa calculada) --------------------------------------
+
+  /* Los rangos llegan RESUELTOS del motor: cuándo nació cada uno, sus extremos y
+   * la vela que lo frenó. Aquí no se decide nada: se elige qué parte se enseña.
+   *
+   * Sólo en el Diario, que es donde se calculan. Un rango EXISTE desde el cierre
+   * de la vela que lo confirma y se dibuja desde la vela 1 hasta el cierre de la
+   * vela que lo frenó; si sigue vivo, hasta la última vela a la vista. En replay
+   * no se enseña ninguno que no hubiera cerrado su vela de confirmación, ni su
+   * final antes de que ocurriera: lo que muere después del reloj, sigue vivo. */
+  var RANGE_CHART = "D";
+  var RANGE_NAMES = { bearish: "Rangos CRT diarios · bajistas", bullish: "Rangos CRT diarios · alcistas" };
+  var RANGE_REASONS = {
+    rechazo: "lo frenó un rechazo en sentido contrario",
+    cierre_fuera: "lo frenó un cierre fuera de la vela 1",
+    objetivo: "llegó al extremo contrario de la vela 1"
+  };
+
+  function rangesShown() { return state.chart === RANGE_CHART && !blindfolded(); }
+
+  /* Los rangos que se ven en este tramo, con el final tal como se sabía en él. */
+  function visibleRanges(cut) {
+    var b = bars();
+    if (!rangesShown() || cut.end <= cut.start) { return []; }
+    var daySpan = span(RANGE_CHART);
+    var lo = b.t[cut.start];
+    var edge = b.t[cut.end - 1] + daySpan;   // cierre de la última vela a la vista
+    return (sym().ranges || []).filter(function (r) {
+      var ended = r.end !== null ? r.end + daySpan : null;
+      return r.confirm + daySpan <= edge && (ended === null || ended > lo);
+    }).map(function (r) {
+      var ended = r.end !== null && r.end + daySpan <= edge ? r.end + daySpan : null;
+      // Uno que nació antes del tramo se recorta a su borde: si no, estiraría el
+      // eje hacia fechas que no se están mirando.
+      return {
+        range: r, from: Math.max(r.ref, lo), to: ended === null ? edge : ended,
+        alive: ended === null
+      };
+    });
+  }
+
+  function rangeTraces(cut) {
+    var shown = visibleRanges(cut);
+    return ["bearish", "bullish"].map(function (dir) {
+      var x = [], y = [], text = [];
+      shown.filter(function (item) { return item.range.dir === dir; }).forEach(function (item) {
+        var r = item.range;
+        var caption = (dir === "bearish" ? "Rango CRT bajista" : "Rango CRT alcista") +
+          " (calculado)<br>vela 1 " + stamp(r.ref) + " · confirma " + stamp(r.confirm) +
+          "<br>máximo " + price(r.high) + " · mínimo " + price(r.low) +
+          "<br>" + (item.alive ? "sigue vivo" :
+            RANGE_REASONS[r.reason] + " el " + stamp(r.end));
+        [item.from, item.to, item.to, item.from, item.from].forEach(function (minute) { x.push(iso(minute)); });
+        [r.high, r.high, r.low, r.low, r.high].forEach(function (value) { y.push(value); });
+        for (var i = 0; i < 5; i++) { text.push(caption); }
+        x.push(null); y.push(null); text.push(null);
+      });
+      return {
+        type: "scatter", mode: "lines", name: RANGE_NAMES[dir],
+        x: x, y: y, fill: "toself", fillcolor: rgba(COLORS.ranges[dir], 0.12),
+        line: { color: COLORS.ranges[dir], width: 1.2 },
+        text: text, hoverinfo: "text", hoveron: "points+fills", hoverlabel: { align: "left" }
+      };
+    }).filter(function (trace) { return trace.x.length; });
+  }
+
+  /* Qué se ve de la capa calculada y qué no. Se dice siempre: un Diario sin
+   * rangos en la ventana no es lo mismo que un H4 donde no se dibujan. */
+  function rangeCaption(cut) {
+    if (state.chart !== RANGE_CHART) {
+      return "rangos CRT diarios (calculados): sólo se dibujan en el Diario";
+    }
+    if (blindfolded()) {
+      return "rangos CRT diarios (calculados): ocultos hasta Revelar";
+    }
+    var shown = visibleRanges(cut);
+    var alive = shown.filter(function (item) { return item.alive; })[0];
+    return "rangos CRT diarios (calculados por el motor): " + shown.length +
+      " en la ventana" + (alive
+        ? " · vivo: " + (alive.range.dir === "bearish" ? "bajista" : "alcista") +
+          " de " + price(alive.range.low) + " a " + price(alive.range.high)
+        : " · ninguno vivo");
   }
 
   /* La vela en formación. Se arma con las velas de la temporalidad inferior que
@@ -2113,7 +2198,7 @@
     var range = bounds();
     var cut = slice(range);
 
-    Plotly.react("chart", priceTraces(cut), layout(range), {
+    Plotly.react("chart", priceTraces(cut).concat(rangeTraces(cut)), layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
       // Sin las herramientas de dibujo de Plotly: lo que se marca a mano son la
       // caja, los recuadros y las líneas de este explorador, que se numeran, se
@@ -2145,6 +2230,7 @@
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + sym().label + " · " +
         label(state.chart) + " · " + range.from + " → " + range.to + " · " +
         visible.toLocaleString("es-ES") + " velas. Marca lo que veas y pulsa Revelar. " +
+        rangeCaption(cut) + ". " +
         "Sorteada dentro de " + state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
@@ -2177,9 +2263,8 @@
     // Lo que este explorador NO dibuja. Con el gráfico pelado, la ausencia de
     // marcas se lee como que ahí no pasó nada, y lo que pasa es que todavía no
     // hay quien lo calcule: eso hay que decirlo, no dejarlo suponer.
-    text += " · SIN ESTRATEGIA: aquí no hay ni una capa calculada —ni estructura, " +
-      "ni zonas, ni señales, ni entradas—. Lo único que se dibuja encima del " +
-      "precio lo pone tu mano";
+    text += " · SIN ESTRATEGIA: no hay señales ni entradas. " + rangeCaption(cut) +
+      ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
     if (sym().skipped && sym().skipped.length) {
       text += " · temporalidades sin velas en " + sym().label + ": " +
         sym().skipped.join(" · ");

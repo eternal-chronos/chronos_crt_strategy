@@ -265,10 +265,17 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
     <span><i style="background:#1baf7a"></i>vela alcista
       <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
       por debajo de la apertura, sin ninguna otra lectura detrás</span>
-    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay estructura, ni zonas,
-      ni señales, ni entradas calculadas: todavía no existe nada que las calcule. Lo único
-      que se ve encima del precio lo pone tu mano, y el estado de abajo lo dice en cada
-      dibujo.</span>
+    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay señales ni entradas
+      calculadas. Lo único calculado son los rangos CRT diarios; todo lo demás que se ve encima
+      del precio lo pone tu mano, y el estado de abajo dice en cada dibujo qué es cada cosa.</span>
+    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
+      <i class="box" style="background:#2a78d6; opacity:.3"></i><b>Rangos CRT diarios</b>
+      (calculados por el motor, borde continuo): naranja el bajista, azul el alcista. Nace
+      cuando una vela le saca un extremo a la anterior y cierra dentro de ella; la caja es esa
+      vela anterior. Dura hasta que una vela le saca el extremo contrario a su anterior y lo
+      rechaza, cierra fuera de la caja o toca su otro extremo. Mientras hay uno vivo, otro del
+      mismo sentido no cuenta. Sólo en el Diario; en replay, desde que cerró la vela que lo
+      confirma; ocultos en la auditoría ciega hasta Revelar</span>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra
@@ -294,7 +301,7 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       precio <i>de ese par</i></span>
     <span>los <b>recuadros a mano</b> van punteados y las <b>líneas a mano</b> continuas, cada
       nombre con su color —los tres tonos de la mano, elegidos para no confundirse con
-      ninguna capa calculada el día que la haya—. Se numeran por nombre y no salen de la
+      la capa calculada—. Se numeran por nombre y no salen de la
       pantalla</span>
     <span>con la <b>cuenta simulada</b> cada caja lleva además el dinero que se juega: lo que
       resta si toca el stop y lo que suma si llega al objetivo, con el capital y el riesgo que

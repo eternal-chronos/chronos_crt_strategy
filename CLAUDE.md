@@ -23,9 +23,11 @@ su **confirmación en H4** (`domain/crt/h4_confirmation.py`), sólo en H4, que e
 la señal para buscar entradas. En D, 12H, 6H y 15M no se dibuja nada calculado.
 
 Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
-hay un rango CRT vivo en H3 la caja es su vela 1; si no, la vela anterior aunque
-no sea rango. Si la vela de las 02:00 **cierra** fuera de la caja (por arriba o
-por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
+hay un rango CRT vivo en H3 la caja es su vela 1 (nacido en esa vela o antes);
+si no, la vela anterior aunque no sea rango. En H3 un rango sólo muere al tocar
+su objetivo o cerrar más allá del otro extremo: el `rechazo` (turtle soup a la
+vela anterior) es regla del Diario y en H3 no cuenta (`rejection=False`). Si
+la vela de las 02:00 **cierra** fuera de la caja (por arriba o por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
 (rechazo), la caja se mantiene. Después, una caja queda **inhabilitada cuando el
 precio toca un extremo y luego el otro** (en la misma vela o en velas
 distintas), no cuando la rompe: al cerrar, la vela que tocó el segundo extremo
@@ -97,9 +99,9 @@ nuevo **no cuenta**; hay que esperar otro rango a favor, posterior. Ejemplo: se
 busca bajista, en 3H hay un alcista vivo; una vela sube, toca el máximo de su
 vela 1, lo rechaza y cierra dentro → termina el alcista y nace un bajista (caja =
 la vela anterior). Ese bajista no confirma. En D, 12H, 6H y 4H el rango nacido así sí
-cuenta. Ojo al implementarlo: esa vela `ranges.py` la apunta como `rechazo` (va
-antes que `objetivo` en la prioridad); la excepción debe mirar si la vela tocó
-el objetivo, no el `end_reason`.
+cuenta. Ojo al implementarlo: con `rejection=True` esa vela `ranges.py` la
+apunta como `rechazo` (va antes que `objetivo` en la prioridad); la excepción
+debe mirar si la vela tocó el objetivo, no el `end_reason`.
 
 ## Capas
 

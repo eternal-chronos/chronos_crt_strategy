@@ -11,7 +11,8 @@ siguiente a la que lo confirmó. Se habla del bajista; el alcista es el espejo:
 - ``rechazo``: una vela le saca el mínimo a la vela ANTERIOR (a la que sea, no a
   la vela 1) y cierra por encima de ese mínimo. Es el turtle soup o el rango
   alcista que se forma dentro. Romper el mínimo y cerrar por debajo NO lo frena:
-  eso es que sigue bajando.
+  eso es que sigue bajando. **Es regla del Diario**: con ``rejection=False``
+  (H3) no frena nada y el rango sólo muere por las otras dos.
 - ``cierre_fuera``: una vela cierra por encima del máximo de la vela 1.
 - ``objetivo``: una vela toca el mínimo de la vela 1.
 
@@ -19,9 +20,10 @@ Si en la misma vela se dan varias, se apunta la primera de esa lista en el orden
 ``cierre_fuera``, ``rechazo``, ``objetivo``: lo que manda es que el rango muere.
 
 Sólo hay un rango vivo a la vez. Un rango del mismo sentido que se forme mientras
-otro vive se ignora. Uno del sentido contrario no puede formarse sin frenar al
-vivo (le saca el extremo a la vela anterior y cierra de vuelta dentro), así que
-en esa misma vela muere el viejo y nace el nuevo.
+otro vive se ignora. Con ``rechazo``, uno del sentido contrario no puede formarse
+sin frenar al vivo (le saca el extremo a la vela anterior y cierra de vuelta
+dentro), así que en esa misma vela muere el viejo y nace el nuevo. Sin él, el
+contrario también se ignora mientras el vivo no muera.
 
 Agnóstico a par y a temporalidad: se compara precio con precio de la misma serie
 y no hay ni un umbral.
@@ -45,13 +47,14 @@ TARGET_HIT = "objetivo"
 COLUMNS = ("direction", "reference", "confirmation", "high", "low", "end", "end_reason")
 
 
-def crt_ranges(bars: pd.DataFrame) -> pd.DataFrame:
+def crt_ranges(bars: pd.DataFrame, *, rejection: bool = True) -> pd.DataFrame:
     """Los rangos CRT de la serie, en orden, con su final.
 
     Devuelve una fila por rango con posiciones enteras sobre ``bars``:
     ``reference`` (vela 1), ``confirmation`` (vela 2, la que lo hace existir al
     cerrar), ``end`` (la vela que lo frenó, -1 si sigue vivo) y ``end_reason``.
-    ``high``/``low`` son los de la vela 1.
+    ``high``/``low`` son los de la vela 1. ``rejection`` dice si el turtle soup a
+    la vela anterior frena el rango: sí en el Diario, no en H3.
 
     El nacimiento y los frenos que sólo miran la vela anterior se calculan
     vectorizados; lo que queda es un recorrido de estado —un rango vivo o
@@ -76,8 +79,8 @@ def crt_ranges(bars: pd.DataFrame) -> pd.DataFrame:
     births[took_high & ~took_low & closed_inside] = BEARISH
     births[took_low & ~took_high & closed_inside] = BULLISH
     # Le saca el extremo a la vela anterior y cierra de vuelta del otro lado de él.
-    rejects_bearish = took_low & (close > prev_low)
-    rejects_bullish = took_high & (close < prev_high)
+    rejects_bearish = took_low & (close > prev_low) & rejection
+    rejects_bullish = took_high & (close < prev_high) & rejection
 
     rows: list[_Range] = []
     alive: _Range | None = None

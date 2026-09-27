@@ -86,6 +86,21 @@ def test_sacar_el_bajo_de_la_anterior_y_rechazarlo_lo_frena() -> None:
     assert rangos.iloc[0]["end_reason"] == REJECTED
 
 
+def test_sin_rechazo_el_turtle_soup_no_lo_frena_ni_abre_el_contrario() -> None:
+    """H3: el turtle soup a la vela anterior no cuenta; el alcista que forma se ignora."""
+    rangos = crt_ranges(
+        _bars(
+            VELA_1,
+            BARRIDO_ARRIBA,
+            (1914.7, 1899.5, 1904.0),
+            (1908.0, 1897.0, 1905.0),
+        ),
+        rejection=False,
+    )
+    assert rangos["direction"].tolist() == [BEARISH]
+    assert rangos.iloc[0]["end"] == -1
+
+
 def test_la_vela_que_lo_frena_abre_el_rango_contrario_si_cumple() -> None:
     """Saca el bajo de la anterior y cierra DENTRO de ella: muere el bajista, nace el alcista."""
     rangos = crt_ranges(

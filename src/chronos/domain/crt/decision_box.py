@@ -3,7 +3,10 @@
 Cada día abre una vela de H3 a las 02:00 NY. Un minuto antes —al cierre de la
 vela anterior— se marca una caja:
 
-- si hay un rango CRT vivo en H3 (``ranges.py``), la caja es ese rango: su vela 1;
+- si hay un rango CRT vivo en H3 (``ranges.py``), la caja es ese rango: su vela 1.
+  En H3 un rango sólo muere al tocar su objetivo o cerrar más allá de su otro
+  extremo; el turtle soup a la vela anterior (``rechazo``) es del Diario y aquí
+  no cuenta;
 - si no lo hay, la caja es la vela anterior, sea o no un rango.
 
 Desde ahí, vela a vela, cada caja puede quedar inhabilitada y sustituida por la
@@ -88,7 +91,7 @@ def decision_boxes(bars: pd.DataFrame, schedule: DecisionSchedule = NEW_YORK) ->
 
     # Sólo hay un rango vivo a la vez y van en orden: el único candidato es el
     # último confirmado a más tardar en la vela anterior.
-    ranges = crt_ranges(bars)
+    ranges = crt_ranges(bars, rejection=False)
     alive = np.zeros(len(prior), dtype=bool)
     slot = np.zeros(len(prior), dtype=int)
     if len(ranges):

@@ -24,8 +24,11 @@ Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
 hay un rango CRT vivo en H3 la caja es su vela 1; si no, la vela anterior aunque
 no sea rango. Si la vela de las 02:00 **cierra** fuera de la caja (por arriba o
 por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
-(rechazo), la caja se mantiene. Vale hasta las 12:00 NY. El explorador sólo
-dibuja la actual; las anteriores no se ven.
+(rechazo), la caja se mantiene. Después, una caja queda **inhabilitada cuando el
+precio toca un extremo y luego el otro** (en la misma vela o en velas
+distintas), no cuando la rompe: al cerrar, la vela que tocó el segundo extremo
+pasa a ser la caja, y así hasta las 12:00 NY (sólo cuentan velas que cierran a
+esa hora o antes). El explorador sólo dibuja la actual; las anteriores no se ven.
 
 El resto del flujo está en la sección siguiente, por programar.
 

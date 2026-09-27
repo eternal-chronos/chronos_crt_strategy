@@ -199,13 +199,13 @@ def test_la_unica_capa_calculada_del_payload_es_la_caja_de_las_2(run: ChartRun) 
             continue
         assert symbol["boxes"], f"{symbol['id']}: la fixture debería dar alguna caja"
         tipos = {caja["kind"] for caja in symbol["boxes"]}
-        assert tipos == {"rango", "vela_previa", "ruptura"}, "la fixture debería dar los tres tipos"
+        assert tipos == {"rango", "vela_previa", "ruptura", "barrido"}, (
+            "la fixture debería dar los cuatro tipos"
+        )
         for caja in symbol["boxes"]:
-            assert set(caja) == {
-                "kind", "dir", "ref", "known", "decision", "until", "high", "low", "replaced"
-            }
+            assert set(caja) == {"kind", "dir", "ref", "known", "until", "high", "low"}
             assert (caja["dir"] in {"bullish", "bearish"}) == (caja["kind"] == "rango")
-            assert caja["ref"] <= caja["known"] <= caja["decision"] < caja["until"]
+            assert caja["ref"] <= caja["known"] < caja["until"]
             assert caja["low"] <= caja["high"]
 
 
@@ -407,7 +407,9 @@ def test_las_cajas_van_rellenas_con_su_color_y_su_origen(drawn: dict) -> None:
         for texto in traza["captions"]:
             assert texto.startswith("Caja de las 02:00 (calculada)")
             if traza["name"].endswith("vela"):
-                assert "la vela anterior" in texto or "cerró fuera de la caja" in texto
+                assert any(origen in texto for origen in (
+                    "la vela anterior", "cerró fuera de la caja", "tocó el segundo extremo"
+                ))
             else:
                 assert "vivo antes de las 02:00 NY" in texto
 

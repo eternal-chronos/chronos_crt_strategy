@@ -187,8 +187,7 @@ def _boxes_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
 
     Viajan etiquetas y no cierres: el navegador sabe cuándo cierra cada vela
     (`t + span`), con la misma cuenta con la que mueve el reloj del replay. Así
-    no enseña una caja antes de que cierre la vela que la hace existir, ni dice
-    que la vela de las 02:00 la sustituyó antes de que esa vela cierre.
+    no enseña una caja antes de que cierre la vela que la hace existir.
     """
     boxes = decision_boxes(frame)
     minutes = _epoch_minutes(pd.DatetimeIndex(frame.index))
@@ -201,22 +200,18 @@ def _boxes_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
             ),
             "ref": minutes[reference],
             "known": minutes[known],
-            "decision": minutes[decision],
             "until": until[position],
             "high": round(float(high), _PAYLOAD_DECIMALS),
             "low": round(float(low), _PAYLOAD_DECIMALS),
-            "replaced": bool(replaced),
         }
-        for position, (kind, direction, reference, known, decision, high, low, replaced) in enumerate(
+        for position, (kind, direction, reference, known, high, low) in enumerate(
             zip(
                 boxes["kind"].tolist(),
                 boxes["direction"].tolist(),
                 boxes["reference"].tolist(),
                 boxes["known"].tolist(),
-                boxes["decision"].tolist(),
                 boxes["high"].tolist(),
                 boxes["low"].tolist(),
-                boxes["replaced"].tolist(),
                 strict=True,
             )
         )

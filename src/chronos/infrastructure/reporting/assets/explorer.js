@@ -305,15 +305,16 @@
   // --- Caja de las 02:00 en H3 (capa calculada) ---------------------------------
 
   /* Las cajas llegan RESUELTAS del motor: de qué vela sale cada una, cuándo se
-   * sabe y si la vela de las 02:00 la sustituyó. Aquí no se decide nada: se
+   * sabe y cuál la sustituye. Aquí no se decide nada: se
    * elige qué parte se enseña.
    *
    * Sólo en H3, que es donde se calculan; en el Diario, H12 y H6 no se dibuja
    * nada calculado. Y SÓLO LA ACTUAL: la última que se sabe al cierre de la
-   * última vela a la vista. Las de días anteriores, y la que sustituyó la vela
-   * de las 02:00, no se dibujan. Una caja existe desde el cierre de la vela que
-   * la hace existir —la anterior a las 02:00, o la de las 02:00 si cerró fuera—
-   * y se dibuja desde su vela hasta las 12:00 NY; en replay, hasta el reloj. */
+   * última vela a la vista. Las de días anteriores y las sustituidas no se
+   * dibujan. Una caja existe desde el cierre de la vela que
+   * la hace existir —la anterior a las 02:00, la de las 02:00 si cerró fuera o
+   * la que tocó el segundo extremo de la anterior— y se dibuja desde su vela
+   * hasta las 12:00 NY; en replay, hasta el reloj. */
   var BOX_CHART = "H3";
   var BOX_NAMES = {
     bearish: "Caja de las 02:00 · rango bajista",
@@ -350,7 +351,10 @@
     if (box.kind === "vela_previa") {
       return "sin rango vivo antes de las 02:00 NY: la vela anterior, " + stamp(box.ref);
     }
-    return "la vela de las 02:00 NY, " + stamp(box.ref) + ", que cerró fuera de la caja";
+    if (box.kind === "ruptura") {
+      return "la vela de las 02:00 NY, " + stamp(box.ref) + ", que cerró fuera de la caja";
+    }
+    return "la vela " + stamp(box.ref) + ", que tocó el segundo extremo de la caja anterior";
   }
 
   function boxTraces(cut) {
@@ -388,7 +392,8 @@
     var current = visibleBoxes(cut)[0];
     return "caja de las 02:00 NY en H3 (calculada por el motor): el rango vivo antes de " +
       "las 02:00, o la vela anterior si no hay; la sustituye la de las 02:00 si cierra " +
-      "fuera; vale hasta las 12:00 NY; sólo la actual, las anteriores no se dibujan · " +
+      "fuera, o la vela que toque su segundo extremo; vale hasta las 12:00 NY; sólo la " +
+      "actual, las anteriores no se dibujan · " +
       (current
         ? "actual: de " + price(current.box.low) + " a " + price(current.box.high)
         : "ninguna a la vista");

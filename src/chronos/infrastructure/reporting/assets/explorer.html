@@ -275,12 +275,14 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       el bajista, azul el alcista); si no, es la vela anterior aunque no sea un rango (ámbar).
       Si la vela de las 02:00 cierra fuera de la caja, por arriba o por abajo, al cerrar pasa a
       ser ella la caja (ámbar); si sólo saca la mecha y cierra dentro, es rechazo y la caja se
-      mantiene. Vale hasta las 12:00 NY. <b>Sólo se dibuja la actual</b>: las de días
-      anteriores y la que sustituyó la vela de las 02:00 no se ven. En tu reloj UTC-4 esa vela sale a las 02:00 en verano
-      y a las 03:00 en invierno: es la misma. En el Diario, H12 y H6 no se dibuja nada
-      calculado. En replay, cada caja desde que cierra la vela que la hace existir; ocultas en
-      la auditoría ciega hasta Revelar</span>
-n>
+      mantiene. Después, si el precio toca un extremo de la caja y luego el otro (en la misma
+      vela o en otra), la caja queda inhabilitada y al cerrar pasa a ser la vela que tocó el
+      segundo (ámbar); cerrar fuera ya no la inhabilita. Vale hasta las 12:00 NY. <b>Sólo se
+      dibuja la actual</b>: las de días anteriores y las sustituidas no se ven. En un reloj
+      UTC-4 fijo la vela de las 02:00 NY sale a las 02:00 en verano y a las 03:00 en invierno:
+      es la misma. En el Diario, H12 y H6 no se dibuja nada calculado. En replay, cada caja
+      desde que cierra la vela que la hace existir; ocultas en la auditoría ciega hasta
+      Revelar</span>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra

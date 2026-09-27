@@ -17,19 +17,46 @@ from chronos.domain.errors import DomainError
 #: Temporalidades que el explorador sabe construir desde un histórico M1.
 M15 = "M15"
 H1 = "H1"
+H3 = "H3"
 H4 = "H4"
+H6 = "H6"
+H12 = "H12"
 DAILY = "D"
 
-SUPPORTED_TIMEFRAMES = (M15, H1, H4, DAILY)
+SUPPORTED_TIMEFRAMES = (M15, H1, H3, H4, H6, H12, DAILY)
 
-TIMEFRAME_MINUTES: dict[str, int] = {M15: 15, H1: 60, H4: 240, DAILY: 1440}
+TIMEFRAME_MINUTES: dict[str, int] = {
+    M15: 15,
+    H1: 60,
+    H3: 180,
+    H4: 240,
+    H6: 360,
+    H12: 720,
+    DAILY: 1440,
+}
 
 #: Cómo se escribe cada temporalidad en los controles y en la leyenda.
-TIMEFRAME_LABELS: dict[str, str] = {DAILY: "Diario", H4: "H4", H1: "H1", M15: "M15"}
+TIMEFRAME_LABELS: dict[str, str] = {
+    DAILY: "Diario",
+    H12: "H12",
+    H6: "H6",
+    H4: "H4",
+    H3: "H3",
+    H1: "H1",
+    M15: "M15",
+}
 
 #: Tecla que salta a cada gráfico. Va aquí y no en el JavaScript porque el
 #: explorador dibuja sólo las temporalidades que la configuración pide.
-TIMEFRAME_KEYS: dict[str, str] = {DAILY: "d", H4: "4", H1: "1", M15: "m"}
+TIMEFRAME_KEYS: dict[str, str] = {
+    DAILY: "d",
+    H12: "2",
+    H6: "6",
+    H4: "4",
+    H3: "3",
+    H1: "1",
+    M15: "m",
+}
 
 
 def by_size(timeframes: Iterable[str], *, descending: bool = True) -> tuple[str, ...]:
@@ -63,6 +90,9 @@ class SymbolConfig:
     decimals: int = 5
     #: Cómo se escribe el par en el selector. Vacío = el propio símbolo.
     label: str = ""
+    #: Gráficos de ESTE par. Vacío = los `timeframes` generales del explorador.
+    #: Una temporalidad que sólo se mira en un par se declara aquí, no para todos.
+    timeframes: tuple[str, ...] = ()
 
     def __post_init__(self) -> None:
         if not self.symbol.strip():
@@ -180,6 +210,17 @@ class AggregationConfig:
         return anchor.describe() if anchor is not None else f"{self.d_session_start} UTC"
 
 
+def _check_timeframes(timeframes: tuple[str, ...], where: str) -> None:
+    for timeframe in timeframes:
+        if timeframe not in SUPPORTED_TIMEFRAMES:
+            raise DomainError(
+                f"Temporalidad no soportada en {where}: {timeframe}. "
+                f"Disponibles: {', '.join(SUPPORTED_TIMEFRAMES)}"
+            )
+    if len(set(timeframes)) != len(timeframes):
+        raise DomainError(f"Hay temporalidades repetidas en {where}: {timeframes}")
+
+
 def _parse_time(hour: str, minute: str) -> time:
     try:
         return time(hour=int(hour), minute=int(minute))
@@ -280,16 +321,11 @@ class ExplorerConfig:
             raise DomainError(f"price_side desconocido: {self.price_side}")
         if not self.timeframes:
             raise DomainError("Hay que declarar al menos una temporalidad")
-        for timeframe in self.timeframes:
-            if timeframe not in SUPPORTED_TIMEFRAMES:
-                raise DomainError(
-                    f"Temporalidad no soportada: {timeframe}. "
-                    f"Disponibles: {', '.join(SUPPORTED_TIMEFRAMES)}"
-                )
-        if len(set(self.timeframes)) != len(self.timeframes):
-            raise DomainError(f"Hay temporalidades repetidas: {self.timeframes}")
+        _check_timeframes(self.timeframes, "timeframes")
         if not self.symbols:
             raise DomainError("Hay que declarar al menos un par")
+        for symbol in self.symbols:
+            _check_timeframes(symbol.timeframes, f"timeframes de {symbol.symbol}")
         names = [symbol.symbol.upper() for symbol in self.symbols]
         if len(set(names)) != len(names):
             raise DomainError(f"Hay pares repetidos: {', '.join(names)}")
@@ -298,6 +334,17 @@ class ExplorerConfig:
     def ordered_timeframes(self) -> tuple[str, ...]:
         """Las temporalidades de mayor a menor, que es el orden de los botones."""
         return by_size(self.timeframes)
+
+    def timeframes_for(self, symbol: SymbolConfig) -> tuple[str, ...]:
+        """Las temporalidades de un par, de mayor a menor: las suyas o las generales."""
+        return by_size(symbol.timeframes or self.timeframes)
+
+    @property
+    def all_timeframes(self) -> tuple[str, ...]:
+        """Todas las que se dibujan en algún par, de mayor a menor."""
+        return by_size(
+            [*self.timeframes, *(tf for symbol in self.symbols for tf in symbol.timeframes)]
+        )
 
     @property
     def declared(self) -> tuple[SymbolConfig, ...]:

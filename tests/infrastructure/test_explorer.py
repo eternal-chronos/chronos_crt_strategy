@@ -1,12 +1,13 @@
-"""El explorador de velas: lo que calcula el motor y lo que marca la mano.
+"""El explorador de velas: lo que se dibuja y lo que se marca a mano.
 
-Es la única herramienta visual del proyecto y lo que se comprueba aquí es doble:
+Es la única herramienta visual del proyecto y todavía no hay estrategia que
+dibujar, así que lo que se comprueba aquí es doble:
 
   · que el CHASIS funciona —los cuatro pares, las temporalidades, la ventana, el
     replay, el zoom y las herramientas de mano—, y
-  · que las ÚNICAS capas calculadas que se dibujan son las CRT: los rangos
-    diarios, los rangos H4 y la alineación entre los dos. Cualquier otra traza o
-    forma que no sea precio ni marca de mano es un error, y el test lo dice con
+  · que lo único calculado que dibuja es la caja de las 02:00, sólo en H3,
+    sin adelantarse al reloj del replay y separada de lo de la mano.
+    Cualquier otra traza que no sean velas es un error, y el test lo dice con
     nombre.
 
 El JavaScript se ejecuta con node contra un DOM simulado: no sustituye a mirar
@@ -30,7 +31,10 @@ import pytest
 from chronos.application.chart.config import (
     DAILY,
     H1,
+    H3,
     H4,
+    H6,
+    H12,
     M15,
     ExplorerConfig,
     ExplorerReportingConfig,
@@ -44,22 +48,26 @@ from chronos.infrastructure.market.loader import SidedHistory
 from chronos.infrastructure.reporting.explorer import (
     ASSETS,
     BEARISH,
+    BOX_COLORS,
     BULLISH,
-    CONTEXT,
     HAND_COLORS,
-    AlignmentLayer,
-    RangeLayer,
     bar_counts,
     build_payload,
     payload_size,
     render_explorer,
 )
-from chronos.interface.crt_layer import alignment_layer, build_ranges, range_layer
 from tests.conftest import make_m1_history
 
 #: Dos pares con precios de escalas muy distintas: es lo que obliga a que los
 #: decimales, el pip y el eje sean POR PAR y no una constante del explorador.
-GOLD = SymbolConfig(symbol="XAUUSD", label="XAUUSD (oro)", bid_path="x.parquet", decimals=2)
+#: El oro trae además H12, H6 y H3, que el euro no: los gráficos también son POR PAR.
+GOLD = SymbolConfig(
+    symbol="XAUUSD",
+    label="XAUUSD (oro)",
+    bid_path="x.parquet",
+    decimals=2,
+    timeframes=(DAILY, H12, H6, H4, H3, H1, M15),
+)
 EURO = SymbolConfig(symbol="EURUSD", label="EURUSD", bid_path="y.parquet", decimals=5)
 
 
@@ -84,7 +92,7 @@ def _symbol_bars(
     )
     series = {
         timeframe: aggregate(frame, timeframe, config.aggregation)
-        for timeframe in config.ordered_timeframes
+        for timeframe in config.timeframes_for(symbol)
     }
     return SymbolBars(config=symbol, history=history, series=series, skipped=())
 
@@ -113,22 +121,6 @@ def run() -> ChartRun:
     return _run()
 
 
-@pytest.fixture(scope="module")
-def layer(run: ChartRun) -> RangeLayer:
-    """La capa calculada, compuesta como la compone la CLI.
-
-    El explorador no la detecta: la recibe. Aquí se hace lo mismo que en el
-    punto de composición para dibujar exactamente lo que se dibujaría de verdad.
-    """
-    return range_layer(build_ranges(run))
-
-
-@pytest.fixture(scope="module")
-def focus(run: ChartRun) -> AlignmentLayer:
-    """La segunda capa: los rangos H4 y la línea de estados, igual de compuesta."""
-    return alignment_layer(build_ranges(run))
-
-
 # --- Payload ------------------------------------------------------------------
 
 
@@ -145,12 +137,33 @@ def test_cada_par_lleva_sus_decimales(run: ChartRun) -> None:
     assert decimales == {"XAUUSD": 2, "EURUSD": 5}
 
 
-def test_cada_par_lleva_sus_velas_en_las_cuatro_temporalidades(run: ChartRun) -> None:
+def test_cada_par_lleva_sus_velas_en_sus_temporalidades(run: ChartRun) -> None:
     counts = bar_counts(build_payload(run))
     assert set(counts) == {"XAUUSD", "EURUSD"}
+    assert set(counts["EURUSD"]) == {DAILY, H4, H1, M15}
+    assert set(counts["XAUUSD"]) == {DAILY, H12, H6, H4, H3, H1, M15}
     for charts in counts.values():
-        assert set(charts) == {DAILY, H4, H1, M15}
         assert charts[M15] > charts[H1] > charts[H4] > charts[DAILY]
+    oro = counts["XAUUSD"]
+    assert oro[H1] > oro[H3] > oro[H4] > oro[H6] > oro[H12] > oro[DAILY]
+
+
+def test_los_graficos_de_cada_par_van_de_mayor_a_menor(run: ChartRun) -> None:
+    charts = {item["id"]: item["charts"] for item in build_payload(run)["symbols"]}
+    assert charts["XAUUSD"] == [DAILY, H12, H6, H4, H3, H1, M15]
+    assert charts["EURUSD"] == [DAILY, H4, H1, M15]
+
+
+def test_la_tecla_de_h12_viaja_aunque_solo_la_use_un_par(run: ChartRun) -> None:
+    assert build_payload(run)["keys"][H12] == "2"
+    assert build_payload(run)["keys"][H6] == "6"
+    assert build_payload(run)["keys"][H3] == "3"
+
+
+def test_una_temporalidad_de_par_no_soportada_falla_con_nombre() -> None:
+    raro = replace(GOLD, timeframes=(DAILY, "H8"))
+    with pytest.raises(DomainError, match="H8"):
+        _config(symbols=(raro, EURO))
 
 
 def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
@@ -158,76 +171,56 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
     spans = build_payload(run)["symbols"][0]["spans"]
     assert spans[M15] == 15
     assert spans[H1] == 60
+    assert spans[H3] == 180
     assert spans[H4] == 240
+    assert spans[H6] == 360
+    assert spans[H12] == 720
     # Con ancla de sesión el diario no dura siempre lo mismo, pero la moda sí.
     assert spans[DAILY] == 1440
 
 
-def test_el_payload_lleva_las_capas_calculadas_y_se_llaman_por_su_nombre(
-    run: ChartRun,
-) -> None:
-    """Los rangos CRT, el enfoque de H4 y nada más.
+def test_la_unica_capa_calculada_del_payload_es_la_caja_de_las_2(run: ChartRun) -> None:
+    """Velas y cajas de las 02:00 en H3, y nada más.
 
     Si un día aparece una clave que no sea de las de abajo, será porque alguien
-    ha metido otra capa calculada y este test tiene que enterarse. Nació con una
-    sola capa y se ha actualizado a propósito al escribirse la segunda.
+    ha metido otra capa calculada y este test tiene que enterarse.
     """
     payload = build_payload(run)
     assert set(payload) == {
-        "meta", "colors", "labels", "keys", "marks", "crt", "h4", "symbols", "unavailable"
+        "meta", "colors", "labels", "keys", "marks", "symbols", "unavailable"
     }
     for symbol in payload["symbols"]:
         assert set(symbol) == {
             "id", "label", "decimals", "side", "provenance",
-            "charts", "spans", "bars", "skipped", "ranges", "h4Ranges", "states",
+            "charts", "spans", "bars", "skipped", "boxes",
         }
+        if H3 not in symbol["charts"]:
+            assert symbol["boxes"] == [], f"{symbol['id']}: sin H3 no hay cajas"
+            continue
+        assert symbol["boxes"], f"{symbol['id']}: la fixture debería dar alguna caja"
+        tipos = {caja["kind"] for caja in symbol["boxes"]}
+        assert tipos == {"rango", "vela_previa", "ruptura", "barrido"}, (
+            "la fixture debería dar los cuatro tipos"
+        )
+        for caja in symbol["boxes"]:
+            assert set(caja) == {"kind", "dir", "ref", "known", "until", "high", "low"}
+            assert (caja["dir"] in {"bullish", "bearish"}) == (caja["kind"] == "rango")
+            assert caja["ref"] <= caja["known"] < caja["until"]
+            assert caja["low"] <= caja["high"]
 
 
-def test_sin_capa_el_payload_lo_dice_en_vez_de_callarse(run: ChartRun) -> None:
-    """Un explorador sin rangos tiene que poder dibujarse igual."""
-    payload = build_payload(run)
-    assert payload["crt"]["timeframe"] is None
-    assert payload["h4"]["timeframe"] is None
-    assert all(symbol["ranges"] == [] for symbol in payload["symbols"])
-    assert all(symbol["h4Ranges"] == [] for symbol in payload["symbols"])
-    assert all(symbol["states"]["t"] == [] for symbol in payload["symbols"])
+def test_las_cajas_se_calculan_con_todo_h3_aunque_se_recorte(run: ChartRun) -> None:
+    """Cuántas velas se embeben no puede cambiar qué cajas hay."""
+    corto = _config(reporting=ExplorerReportingConfig(max_explorer_bars=5))
+    completo = build_payload(run)["symbols"][0]["boxes"]
+    recortado = build_payload(replace(run, config=corto))["symbols"][0]["boxes"]
+    assert recortado == completo
 
 
-def test_los_rangos_viajan_por_par_con_lo_que_hace_falta_para_dibujarlos(
-    run: ChartRun, layer: RangeLayer
-) -> None:
-    payload = build_payload(run, ranges=layer)
-
-    assert payload["crt"]["timeframe"] == DAILY
-    assert payload["crt"]["label"] == "Diario"
-    assert payload["crt"]["tp"] == "TP D1"
-    assert payload["crt"]["description"]
-
-    rangos = payload["symbols"][0]["ranges"]
-    assert rangos, "la fixture tiene que dar algún rango que dibujar"
-    assert set(rangos[0]) == {
-        "id", "dir", "up", "ref", "confirm", "known", "high", "low", "manip",
-        "target", "invalidation", "size", "sizeAtr", "status", "resolved",
-        "resolvedAt", "candles", "ambiguous",
-    }
-    for item in rangos:
-        # La vela de referencia va antes de la de confirmación, y el rango no
-        # existe hasta que ésta CIERRA.
-        assert item["ref"] < item["confirm"] < item["known"]
-        assert item["low"] < item["high"]
-        assert (item["resolved"] is None) == (item["resolvedAt"] is None)
-        if item["resolved"] is not None:
-            assert item["resolved"] > item["confirm"]
-            assert item["resolvedAt"] > item["known"]
-
-
-def test_cada_par_lleva_sus_propios_rangos(run: ChartRun, layer: RangeLayer) -> None:
-    """El euro de la fixture es el oro reescalado: los mismos rangos, otros precios."""
-    payload = build_payload(run, ranges=layer)
-    oro, euro = payload["symbols"][0]["ranges"], payload["symbols"][1]["ranges"]
-
-    assert len(oro) == len(euro)
-    assert oro[0]["high"] > 100 > euro[0]["high"]
+def test_los_colores_de_las_cajas_no_son_ni_de_velas_ni_de_la_mano() -> None:
+    colores = set(BOX_COLORS.values())
+    assert len(colores) == 3
+    assert not colores & {BULLISH, BEARISH, *HAND_COLORS}
 
 
 def test_los_nombres_de_las_marcas_salen_de_la_configuracion() -> None:
@@ -288,14 +281,10 @@ def test_el_html_es_autocontenido(run: ChartRun) -> None:
     assert "src=" not in html.split('<script id="explorer-data"')[0]
 
 
-def test_la_cabecera_dice_qué_capa_calculada_lleva(run: ChartRun, layer: RangeLayer) -> None:
-    html = render_explorer(run, ranges=layer)
-    assert "capa calculada: rangos CRT de Diario" in html
+def test_el_html_dice_en_la_cabecera_que_no_hay_estrategia(run: ChartRun) -> None:
+    html = render_explorer(run)
+    assert "sin estrategia" in html
     assert "XAUUSD (oro) · EURUSD" in html
-
-
-def test_sin_capa_la_cabecera_no_promete_ninguna(run: ChartRun) -> None:
-    assert "sin ninguna capa calculada" in render_explorer(run)
 
 
 def test_el_json_embebido_no_puede_cerrar_la_etiqueta(run: ChartRun) -> None:
@@ -312,18 +301,13 @@ def test_el_tamano_del_payload_se_puede_vigilar(run: ChartRun) -> None:
 # --- El JavaScript, contra un DOM simulado ------------------------------------
 
 
-def _draw(
-    run: ChartRun, layer: RangeLayer, focus: AlignmentLayer, tmp_path: Path
-) -> dict:
+def _draw(run: ChartRun, tmp_path: Path) -> dict:
     node = shutil.which("node")
     if node is None:
         pytest.skip("node no está disponible: no se puede ejecutar el JavaScript")
 
     payload_path = tmp_path / "payload.json"
-    payload_path.write_text(
-        json.dumps(build_payload(run, ranges=layer, alignment=focus), default=str),
-        encoding="utf-8",
-    )
+    payload_path.write_text(json.dumps(build_payload(run), default=str), encoding="utf-8")
     stub = Path(__file__).parent / "explorer_dom_stub.js"
     output = subprocess.run(
         [node, str(stub), str(ASSETS / "explorer.js"), str(payload_path)],
@@ -335,13 +319,8 @@ def _draw(
 
 
 @pytest.fixture(scope="module")
-def drawn(
-    run: ChartRun,
-    layer: RangeLayer,
-    focus: AlignmentLayer,
-    tmp_path_factory: pytest.TempPathFactory,
-) -> dict:
-    return _draw(run, layer, focus, tmp_path_factory.mktemp("explorer"))
+def drawn(run: ChartRun, tmp_path_factory: pytest.TempPathFactory) -> dict:
+    return _draw(run, tmp_path_factory.mktemp("explorer"))
 
 
 def _step(resultado: dict, label: str) -> dict:
@@ -352,45 +331,125 @@ def test_el_explorador_se_dibuja_sin_errores(drawn: dict) -> None:
     assert not drawn["unknownElements"], (
         f"el explorador busca elementos que la plantilla no define: {drawn['unknownElements']}"
     )
-    assert drawn["chartTabs"] == ["Diario", "H4", "H1", "M15"]
+    assert drawn["chartTabs"] == ["Diario", "H12", "H6", "H4", "H3", "H1", "M15"]
     assert drawn["presetLabels"][0] == "Todo"
     assert _step(drawn, "todo")["plot"]["target"] == "chart"
 
 
-#: Las trazas calculadas que se admiten hoy, por el principio de su nombre.
-TRAZAS_CALCULADAS = ("Rangos CRT", "Estado H4")
+CAJAS = {
+    "Caja de las 02:00 · rango bajista",
+    "Caja de las 02:00 · rango alcista",
+    "Caja de las 02:00 · vela",
+}
 
 
-def test_las_unicas_trazas_calculadas_son_las_de_la_capa_crt(drawn: dict) -> None:
-    """La promesa del proyecto, comprobada en cada paso del recorrido.
-
-    Este test nació diciendo que NINGUNA traza podía ser otra cosa que velas.
-    Al escribirse la primera regla se actualizó a propósito, y al escribirse el
-    enfoque de H4 otra vez: la lista dice exactamente qué se admite y cualquier
-    otra traza sigue siendo un error.
-    """
+def test_lo_unico_calculado_es_la_caja_y_solo_en_h3(drawn: dict) -> None:
+    """Comprobado en cada paso del recorrido: fuera de H3, sólo velas. En el
+    Diario, H12 y H6 no se dibuja nada calculado."""
     for step in drawn["steps"]:
-        for name in step["plot"]["calculated"]:
-            assert name.startswith(TRAZAS_CALCULADAS), (
-                f"en «{step['label']}» hay una traza que no es ni precio ni capa CRT: {name}"
-            )
+        calculadas = set(step["plot"]["calculated"])
+        assert calculadas <= CAJAS, (
+            f"en «{step['label']}» hay trazas que no son velas ni cajas: {calculadas - CAJAS}"
+        )
+        if step["chart"] != H3:
+            assert not calculadas, f"en «{step['label']}» ({step['chart']}) se dibujan cajas"
 
 
-def test_en_shapes_solo_hay_marcas_a_mano_y_capas_crt(drawn: dict) -> None:
+def _minuto(texto: str) -> int:
+    return int((pd.Timestamp(texto, tz="UTC") - pd.Timestamp("1970-01-01", tz="UTC")).total_seconds() // 60)
+
+
+def _cajas_esperadas(symbol: dict, step: dict) -> set[tuple[int, int, float, float]]:
+    """La caja actual —la última que se sabe al cierre de la última vela a la
+    vista—, como (desde, hasta, máximo, mínimo), si cae en el tramo."""
+    paso = symbol["spans"][H3]
+    inicio = _minuto(step["plot"]["firstBar"])
+    borde = _minuto(step["plot"]["lastBar"]) + paso
+    sabidas = [caja for caja in symbol["boxes"] if caja["known"] + paso <= borde]
+    if not sabidas:
+        return set()
+    caja = sabidas[-1]
+    desde, hasta = max(caja["ref"], inicio), min(caja["until"], borde)
+    return {(desde, hasta, caja["high"], caja["low"])} if hasta > desde else set()
+
+
+def _cajas_dibujadas(step: dict) -> set[tuple[int, int, float, float]]:
+    dibujadas = set()
+    for traza in step["plot"]["boxes"]:
+        for n in range(traza["count"]):
+            x, y = traza["x"][n * 6 : n * 6 + 5], traza["y"][n * 6 : n * 6 + 5]
+            dibujadas.add((_minuto(x[0]), _minuto(x[1]), y[0], y[2]))
+    return dibujadas
+
+
+def test_en_h3_se_dibujan_las_cajas_que_se_saben(run: ChartRun, drawn: dict) -> None:
+    """Fuera y dentro del replay, sólo la actual: las de días anteriores y la
+    sustituida por la vela de las 02:00 no se dibujan."""
+    simbolos = {symbol["id"]: symbol for symbol in build_payload(run)["symbols"]}
+    vistos = 0
+    for step in drawn["steps"]:
+        if step["chart"] != H3 or "oculta hasta Revelar" in step["notes"]:
+            continue
+        esperadas = _cajas_esperadas(simbolos[step["symbol"]], step)
+        assert _cajas_dibujadas(step) == esperadas, f"«{step['label']}»"
+        assert sum(traza["count"] for traza in step["plot"]["boxes"]) <= 1, f"«{step['label']}»"
+        vistos += len(esperadas)
+    assert vistos, "algún paso del recorrido debería enseñar cajas en H3"
+
+
+def test_las_cajas_van_rellenas_con_su_color_y_su_origen(drawn: dict) -> None:
+    trazas = [t for step in drawn["steps"] for t in step["plot"]["boxes"]]
+    assert trazas
+    grupos = {"rango bajista": "bearish", "rango alcista": "bullish", "vela": "candle"}
+    for traza in trazas:
+        assert traza["color"] == BOX_COLORS[grupos[traza["name"].split(" · ")[1]]]
+        assert traza["fill"] == "toself"
+        for texto in traza["captions"]:
+            assert texto.startswith("Caja de las 02:00 (calculada)")
+            if traza["name"].endswith("vela"):
+                assert any(origen in texto for origen in (
+                    "la vela anterior", "cerró fuera de la caja", "tocó el segundo extremo"
+                ))
+            else:
+                assert "vivo antes de las 02:00 NY" in texto
+
+
+def test_el_replay_no_ensena_cajas_mas_alla_del_reloj(drawn: dict) -> None:
+    """Ni una caja antes de cerrar su vela, ni estirada más allá del reloj."""
+    step = _step(drawn, "replay-en-h3")
+    assert step["chart"] == H3
+    assert step["plot"]["boxes"], "el replay en H3 debería enseñar alguna caja"
+    for traza in step["plot"]["boxes"]:
+        assert traza["maxX"][:16] <= _reloj(step)
+
+
+def test_la_auditoria_ciega_oculta_las_cajas_hasta_revelar(drawn: dict) -> None:
+    ciega = _step(drawn, "ciega")
+    assert ciega["chart"] == H3
+    assert ciega["plot"]["calculated"] == []
+    assert "oculta hasta Revelar" in ciega["notes"]
+    revelada = _step(drawn, "ciega-revelada")
+    assert "oculta hasta Revelar" not in revelada["notes"]
+    assert revelada["plot"]["calculated"]
+
+
+def test_el_estado_dice_que_cajas_se_ven(drawn: dict) -> None:
+    assert "caja de las 02:00 NY en H3 (calculada por el motor)" in _step(drawn, "grafico-H3")["notes"]
+    assert "sólo se dibuja en H3" in _step(drawn, "todo")["notes"]
+
+
+def test_lo_unico_que_hay_en_shapes_lo_ha_puesto_una_mano(drawn: dict) -> None:
     for step in drawn["steps"]:
         assert step["plot"]["shapes"] == 0, (
-            f"en «{step['label']}» hay formas que no ha puesto ni la mano ni el motor"
+            f"en «{step['label']}» hay formas que no ha dibujado el propietario"
         )
 
 
-def test_el_estado_separa_lo_que_calcula_el_motor_de_lo_que_pones_tu(drawn: dict) -> None:
-    """Un rectángulo encima del precio no dice por sí solo quién lo dibujó."""
+def test_el_estado_dice_que_no_hay_estrategia(drawn: dict) -> None:
+    """Un gráfico pelado sin decirlo se lee como que ahí no pasó nada."""
     notas = _step(drawn, "todo")["notes"]
-    assert (
-        "LO QUE CALCULA EL MOTOR SON LOS RANGOS CRT DE DIARIO Y DE H4 Y LA ALINEACIÓN "
-        "ENTRE LOS DOS, Y NADA MÁS" in notas
-    )
-    assert "Todo lo demás que se dibuje encima del precio lo pones tú" in notas
+    assert "SIN ESTRATEGIA" in notas
+    assert "lo pone tu mano" in notas
 
 
 # --- El selector de par --------------------------------------------------------
@@ -439,16 +498,27 @@ def test_el_boton_del_par_dice_lo_que_lleva(drawn: dict) -> None:
 def test_cada_temporalidad_dibuja_sus_velas(drawn: dict) -> None:
     velas = {
         timeframe: _step(drawn, f"grafico-{timeframe}")["plot"]["bars"]
-        for timeframe in (DAILY, H4, H1, M15)
+        for timeframe in (DAILY, H12, H6, H4, H3, H1, M15)
     }
-    assert velas[M15] > velas[H1] > velas[H4] > velas[DAILY]
+    assert velas[M15] > velas[H1] > velas[H3] > velas[H4] > velas[H6] > velas[H12] > velas[DAILY]
 
 
 def test_las_teclas_saltan_de_grafico(drawn: dict) -> None:
     assert _step(drawn, f"teclado-tf-{H4}")["chart"] == H4
+    assert _step(drawn, f"teclado-tf-{H12}")["chart"] == H12
+    assert _step(drawn, f"teclado-tf-{H6}")["chart"] == H6
+    assert _step(drawn, f"teclado-tf-{H3}")["chart"] == H3
     assert _step(drawn, f"teclado-tf-{M15}")["chart"] == M15
     # Con el foco en un campo la tecla escribe y no salta.
     assert _step(drawn, "teclado-tf-en-un-campo")["chart"] == M15
+
+
+def test_el_par_sin_h12_cae_a_su_primer_grafico(drawn: dict) -> None:
+    assert _step(drawn, f"grafico-propio-{H12}")["chart"] == H12
+    otro = _step(drawn, "grafico-propio-otro-par")
+    assert otro["symbol"] == "EURUSD"
+    assert otro["chart"] == DAILY
+    assert otro["plot"]["bars"] > 0
 
 
 def test_la_ventana_avanza_y_retrocede_sin_solapar(drawn: dict) -> None:
@@ -470,7 +540,8 @@ def test_las_flechas_mueven_la_ventana(drawn: dict) -> None:
 def test_la_vista_de_lineas_dibuja_una_sola_traza(drawn: dict) -> None:
     lineas = _step(drawn, "lineas")["plot"]
     velas = _step(drawn, "velas")["plot"]
-    assert [trace["type"] for trace in lineas["traces"]] == ["scatter"]
+    precio = [trace for trace in lineas["traces"] if trace["name"] not in CAJAS]
+    assert [trace["type"] for trace in precio] == ["scatter"]
     assert velas["traces"][0]["type"] == "candlestick"
 
 
@@ -506,6 +577,14 @@ def test_el_paso_adelante_y_atras_se_deshacen(drawn: dict) -> None:
     assert paso["plot"]["lastBar"] >= inicio["plot"]["lastBar"]
 
 
+def test_h4_se_arma_con_h1_y_no_con_h3(drawn: dict) -> None:
+    """H3 va justo debajo de H4 en la lista, pero una H3 quedaría partida entre
+    dos H4: la vela H4 en curso se forma en cuatro pasos de una hora, no en dos
+    de tres."""
+    notas = _step(drawn, "replay-paso")["notes"]
+    assert re.search(r"vela en formación con 1 de 4 velas", notas), notas
+
+
 def test_el_reloj_del_replay_sobrevive_al_cambio_de_par(drawn: dict) -> None:
     """Cambiar de par no puede reiniciar el replay: el reloj es uno solo."""
     antes = _step(drawn, "replay-en-h4")
@@ -535,378 +614,6 @@ def test_arrastrar_sobre_los_ejes_reescala(drawn: dict) -> None:
     fechas = _step(drawn, "eje-fechas-arrastrado")["lastRelayout"]
     assert "yaxis.range" in precios
     assert "xaxis.range" in fechas
-
-
-# --- Los rangos CRT: la capa que calcula el motor ---------------------------------
-
-
-def _rangos(step: dict) -> list[dict]:
-    return [shape for shape in step["plot"]["crt"] if shape["name"].startswith("crt-rango-")]
-
-
-def _objetivos(step: dict) -> list[dict]:
-    return [shape for shape in step["plot"]["crt"] if shape["name"].startswith("crt-tp-")]
-
-
-def _marcas(step: dict) -> dict | None:
-    trazas = [
-        trace for trace in step["plot"]["traces"]
-        if str(trace["name"]).startswith("Rangos CRT")
-    ]
-    return trazas[0] if trazas else None
-
-
-def test_los_rangos_se_dibujan_sobre_su_temporalidad(drawn: dict) -> None:
-    diario = _step(drawn, "crt-en-su-temporalidad")
-    assert _rangos(diario), "en Diario tiene que haber rangos dibujados"
-    # Un rectángulo por rango y una línea de objetivo por rango.
-    assert len(_objetivos(diario)) == len(_rangos(diario))
-    # Y la mecha de manipulación, en una sola traza de puntos.
-    assert _marcas(diario)["points"] == len(_rangos(diario))
-
-
-def test_en_otra_temporalidad_no_se_dibuja_ningun_rango(drawn: dict) -> None:
-    """Un rango diario encima de H1 ocuparía la pantalla y no se leería."""
-    otra = _step(drawn, "crt-en-otra-temporalidad")
-    assert otra["chart"] not in (DAILY, H4)
-    assert otra["plot"]["crt"] == []
-    assert otra["plot"]["h4"] == []
-    assert _marcas(otra) is None
-    assert "se dibujan sólo sobre ese gráfico" in otra["notes"]
-
-
-def test_el_rectangulo_va_por_debajo_del_precio_y_dice_su_estado_con_el_trazo(
-    drawn: dict,
-) -> None:
-    rangos = _rangos(_step(drawn, "crt-en-su-temporalidad"))
-    assert all(shape["layer"] == "below" for shape in rangos), (
-        "los rangos no pueden tapar las velas"
-    )
-    trazos = {shape["dash"] for shape in rangos}
-    assert trazos == {"solid", "dot"}, (
-        "el trazo distingue el rango vivo del resuelto y el recorrido tiene de los dos"
-    )
-    assert all(shape["y0"] < shape["y1"] for shape in rangos)
-
-
-def test_la_linea_del_objetivo_lleva_su_etiqueta(drawn: dict) -> None:
-    etiquetas = {shape["label"] for shape in _objetivos(_step(drawn, "crt-en-su-temporalidad"))}
-    assert "TP D1" in etiquetas
-    assert all(shape["dash"] == "dash" for shape in _objetivos(_step(drawn, "crt-en-su-temporalidad")))
-
-
-def test_ocultar_los_resueltos_deja_solo_los_vivos(drawn: dict) -> None:
-    todos = _rangos(_step(drawn, "crt-en-su-temporalidad"))
-    vivos = _rangos(_step(drawn, "crt-sin-resueltos"))
-
-    assert 0 < len(vivos) < len(todos)
-    assert {shape["dash"] for shape in vivos} == {"solid"}
-    assert "los resueltos están ocultos" in _step(drawn, "crt-sin-resueltos")["notes"]
-    assert _step(drawn, "crt-sin-resueltos")["crtResolvedChecked"] is False
-    assert _step(drawn, "crt-en-su-temporalidad")["crtResolvedChecked"] is True
-
-
-def test_el_panel_dice_hacia_donde_va_el_precio(drawn: dict) -> None:
-    panel = _step(drawn, "crt-en-su-temporalidad")["crtBias"]
-    assert panel.startswith("Sesgo D1: ")
-    if "SIN TARGET" not in panel:
-        assert "Target" in panel and "Invalidación" in panel
-
-
-def test_el_sesgo_y_la_tabla_se_ven_tambien_fuera_del_diario(drawn: dict) -> None:
-    """El sesgo diario manda se mire lo que se mire."""
-    otra = _step(drawn, "crt-en-otra-temporalidad")
-    assert otra["crtBias"].startswith("Sesgo D1: ")
-    assert len(otra["crtRows"]) > 1
-
-
-def test_la_tabla_lista_los_rangos_conocidos(drawn: dict) -> None:
-    """La vela que confirma va con sus DOS marcas: cuándo abre y cuándo cierra.
-
-    La etiqueta de la vela es donde se dibuja el rango; el cierre es cuando el
-    rango existe. Con una sola columna no se podía saber cuál de las dos se
-    estaba leyendo.
-    """
-    filas = _step(drawn, "crt-en-su-temporalidad")["crtRows"]
-    assert filas[0] == [
-        "nº", "dirección", "vela confirma abre (UTC)", "vela confirma cierra (UTC)",
-        "rango", "manipulación", "objetivo", "tamaño", "estado", "resuelto (UTC)", "velas",
-    ]
-    datos = filas[1:]
-    assert datos, "tiene que haber rangos que listar"
-    assert all(len(fila) == len(filas[0]) for fila in datos)
-    # El cierre de la vela que confirma va SIEMPRE después de su apertura.
-    assert all(fila[3] > fila[2] for fila in datos)
-    # La más reciente arriba.
-    assert datos[0][2] >= datos[-1][2]
-    assert "los detecta el motor" in _step(drawn, "crt-en-su-temporalidad")["crtCaption"]
-
-
-def test_en_replay_no_se_dibuja_ningun_rango_mas_alla_del_reloj(drawn: dict) -> None:
-    """Lo que el motor no sabía todavía no puede estar en la pantalla."""
-    for label in ("crt-replay-inicio", "crt-replay-paso"):
-        step = _step(drawn, label)
-        assert step["crtMaxX"] is not None, f"«{label}» no dibuja ningún rango"
-        assert step["crtMaxX"][:16] <= _reloj(step)
-
-
-def test_el_replay_solo_ensena_los_rangos_ya_confirmados(drawn: dict) -> None:
-    replay = _step(drawn, "crt-replay-inicio")
-    completo = _step(drawn, "crt-en-su-temporalidad")
-    assert len(_rangos(replay)) < len(_rangos(completo))
-    assert len(replay["crtRows"]) < len(completo["crtRows"])
-
-
-def test_la_venda_tapa_tambien_lo_que_calcula_el_motor(drawn: dict) -> None:
-    """Enseñar el sesgo mientras se pide una opinión a ciegas sería contar el final."""
-    ciega = _step(drawn, "ciega")
-    revelada = _step(drawn, "ciega-revelada")
-
-    assert ciega["plot"]["crt"] == []
-    assert ciega["crtBias"] == "Sesgo D1: TAPADO"
-    assert ciega["crtRows"][1][0].startswith("la auditoría ciega tapa")
-    assert "la venda tapa también los RANGOS CRT" in ciega["notes"]
-    assert revelada["plot"]["crt"], "al revelar tienen que aparecer"
-
-
-# --- El enfoque de H4: la segunda capa calculada ------------------------------------
-
-
-def _h4_shapes(step: dict, prefix: str) -> list[dict]:
-    return [shape for shape in step["plot"]["h4"] if shape["name"].startswith(prefix)]
-
-
-def _rgba(hex_color: str) -> str:
-    """El principio del color como lo escribe el explorador, sin la opacidad."""
-    rojo, verde, azul = (int(hex_color[i:i + 2], 16) for i in (1, 3, 5))
-    return f"rgba({rojo},{verde},{azul},"
-
-
-def _h4_marcas(step: dict) -> dict | None:
-    trazas = [
-        trace for trace in step["plot"]["traces"]
-        if str(trace["name"]).startswith("Rangos CRT H4")
-    ]
-    return trazas[0] if trazas else None
-
-
-def _estado_diario(step: dict) -> dict | None:
-    trazas = [
-        trace for trace in step["plot"]["traces"]
-        if str(trace["name"]).startswith("Estado H4")
-    ]
-    return trazas[0] if trazas else None
-
-
-def test_la_capa_de_enfoque_viaja_con_su_vocabulario(
-    run: ChartRun, focus: AlignmentLayer
-) -> None:
-    """El explorador no sabe cómo se llaman los estados: se los dicen."""
-    payload = build_payload(run, alignment=focus)
-
-    assert payload["h4"]["timeframe"] == H4
-    assert payload["h4"]["tp"] == "TP H4"
-    assert payload["h4"]["mode"] == "latest"
-    assert payload["h4"]["filtered"] is False
-    assert payload["h4"]["states"] == [
-        "SIN_TARGET", "TARGET_DEFINIDO", "H4_ALINEADO", "H4_EN_CONTRA"
-    ]
-    assert payload["h4"]["labels"]["H4_EN_CONTRA"] == "EN CONTRA"
-    # Sin sesgo no hay nada que señalar: ese estado no tiñe el fondo.
-    assert payload["h4"]["colors"]["SIN_TARGET"] is None
-    assert payload["h4"]["context"] == CONTEXT
-
-
-def test_los_rangos_h4_llevan_su_hora_y_si_alinearon(
-    run: ChartRun, focus: AlignmentLayer
-) -> None:
-    payload = build_payload(run, alignment=focus)
-    rangos = payload["symbols"][0]["h4Ranges"]
-
-    assert rangos, "la fixture tiene que dar algún rango H4"
-    assert set(rangos[0]) >= {"open", "ignored", "aligned"}
-    # El filtro horario está apagado: ninguno queda fuera.
-    assert not any(item["ignored"] for item in rangos)
-    assert {item["aligned"] for item in rangos} <= {True, False, None}
-    # La hora de apertura es la de la vela que CONFIRMÓ el rango, en NY.
-    assert all(re.fullmatch(r"\d{2}:\d{2}", item["open"]) for item in rangos)
-
-
-def test_la_linea_de_estados_tiene_una_fila_por_vela_h4(
-    run: ChartRun, focus: AlignmentLayer
-) -> None:
-    """El estado se reevalúa al cerrar cada vela H4, ni antes ni más veces."""
-    payload = build_payload(run, alignment=focus)
-    symbol = payload["symbols"][0]
-    linea = symbol["states"]
-
-    assert len(linea["t"]) == len(symbol["bars"][H4]["t"])
-    assert all(len(linea[key]) == len(linea["t"]) for key in ("s", "d1", "target", "focus", "block"))
-    assert linea["t"] == sorted(linea["t"])
-    # Cada fila viaja como el índice de su estado dentro del vocabulario.
-    assert set(linea["s"]) <= set(range(len(payload["h4"]["states"])))
-    # El cierre de la primera vela H4 va DESPUÉS de su etiqueta: la fila no
-    # existe hasta que la vela cierra.
-    assert linea["t"][0] > symbol["bars"][H4]["t"][0]
-
-
-def test_sobre_h4_se_dibujan_las_dos_temporalidades_y_el_fondo(drawn: dict) -> None:
-    paso = _step(drawn, "h4-en-su-temporalidad")
-    assert paso["chart"] == H4
-
-    fondo = _h4_shapes(paso, "crt-h4-estado-")
-    rangos = _h4_shapes(paso, "crt-h4-rango-")
-    objetivos = _h4_shapes(paso, "crt-h4-tp-")
-
-    assert fondo, "el fondo por estado tiene que estar"
-    assert all(shape["yref"] == "paper" for shape in fondo), (
-        "el fondo va de arriba abajo del gráfico, no pegado a un precio"
-    )
-    assert all(shape["layer"] == "below" for shape in fondo)
-    assert rangos, "en H4 tiene que haber rangos H4 dibujados"
-    assert len(objetivos) == len(rangos)
-    assert _h4_marcas(paso)["points"] == len(rangos)
-    # Y ni un rango DIARIO: el rectángulo de un día encima de H4 taparía todo.
-    assert paso["plot"]["crt"] == []
-
-
-def test_el_contexto_diario_va_en_azul_y_con_su_etiqueta(drawn: dict) -> None:
-    """Encima de H4 conviven dos temporalidades: hay que poder decir cuál es cuál."""
-    paso = _step(drawn, "h4-en-su-temporalidad")
-    contexto = _h4_shapes(paso, "crt-h4-d1-")
-
-    assert len(contexto) == 3, "el techo, el suelo y el objetivo del rango del sesgo"
-    azul = _rgba(CONTEXT)
-    assert all(str(shape["color"]).startswith(azul) for shape in contexto), (
-        f"el contexto diario va en el azul {CONTEXT}, no en el verde ni el rojo de H4"
-    )
-    etiquetas = {shape["label"] for shape in contexto}
-    assert "TP D1" in etiquetas
-    objetivo = next(shape for shape in contexto if shape["name"] == "crt-h4-d1-tp")
-    assert objetivo["dash"] == "dash"
-    assert all(
-        shape["dash"] == "solid"
-        for shape in contexto
-        if shape["name"] != "crt-h4-d1-tp"
-    )
-
-
-def test_el_estado_se_lee_en_el_panel_al_lado_del_sesgo(drawn: dict) -> None:
-    paso = _step(drawn, "h4-en-su-temporalidad")
-    assert paso["crtBias"].startswith("Sesgo D1: ")
-    assert paso["h4State"].startswith("| H4: ")
-
-
-def test_la_tabla_de_h4_acompana_al_grafico_de_h4(drawn: dict) -> None:
-    """Dos tablas a la vez no se leen: la de H4 sale con el gráfico de H4."""
-    en_h4 = _step(drawn, "h4-en-su-temporalidad")
-    en_diario = _step(drawn, "h4-en-el-diario")
-
-    assert en_h4["h4TableHidden"] is False
-    assert en_diario["h4TableHidden"] is True
-
-    filas = en_h4["h4Rows"]
-    assert filas[0] == [
-        "nº", "dirección",
-        "vela confirma abre (UTC)", "abre (NY)",
-        "vela confirma cierra (UTC)", "cierra (NY)",
-        "rango", "manipulación",
-        "objetivo", "tamaño", "estado", "resuelto (UTC)", "velas", "alineado con D1",
-    ]
-    datos = filas[1:]
-    assert datos, "tiene que haber rangos H4 que listar"
-    assert all(fila[-1] in ("sí", "no (bloqueó)", "—") for fila in datos)
-    assert "alineado con D1" in en_h4["h4Caption"]
-
-
-def test_la_vela_que_confirma_en_h4_se_lee_en_las_dos_horas(drawn: dict) -> None:
-    """En H4 la hora que se habla es la de Nueva York, no la de UTC.
-
-    «La vela de las nueve» sólo se puede decir en el reloj de la plaza: en UTC
-    la misma vela cae a las 13:00 o a las 14:00 según el mes. Las dos marcas
-    —abre y cierra— van por tanto con su hora de allí al lado.
-    """
-    datos = _step(drawn, "h4-en-su-temporalidad")["h4Rows"][1:]
-    assert datos, "tiene que haber rangos H4 que listar"
-    for fila in datos:
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", fila[2])
-        assert re.fullmatch(r"\d{2}:\d{2}", fila[3].split(" ")[0])
-        assert re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", fila[4])
-        assert re.fullmatch(r"\d{2}:\d{2}", fila[5])
-        # Con el corte anclado a la sesión, toda vela H4 cierra en hora en punto
-        # de la plaza: es la misma rejilla con la que abren.
-        assert fila[5].endswith(":00")
-        assert fila[4] > fila[2]
-
-
-def test_la_etiqueta_del_rango_h4_no_tapa_las_velas(drawn: dict) -> None:
-    """Fuera del rectángulo: encima si es alcista, debajo si es bajista.
-
-    Los rectángulos de H4 son pequeños y el texto dentro se comía el precio.
-    `yanchor` contrario a la posición es lo que empuja la etiqueta al otro lado
-    del borde.
-    """
-    # Sólo los rangos VIVOS llevan etiqueta, y con la ventana entera a la vista
-    # ya se han resuelto todos: los vivos salen en los pasos del replay.
-    etiquetados = [
-        shape
-        for step in drawn["steps"]
-        for shape in _h4_shapes(step, "crt-h4-rango-")
-        if shape["label"]
-    ]
-    assert etiquetados, "los rangos H4 vivos llevan etiqueta"
-
-    fuera = {
-        _rgba(BULLISH): ("top left", "bottom"),
-        _rgba(BEARISH): ("bottom left", "top"),
-    }
-    colocadas = set()
-    for shape in etiquetados:
-        esperada = next(
-            (sitio for tono, sitio in fuera.items() if str(shape["color"]).startswith(tono)),
-            None,
-        )
-        assert esperada is not None, f"etiqueta de un color inesperado: {shape['color']}"
-        assert (shape["textposition"], shape["yanchor"]) == esperada, (
-            f"la etiqueta de {shape['name']} cae dentro del rectángulo"
-        )
-        colocadas.add(esperada)
-    assert len(colocadas) == 2, "el recorrido tiene rangos de las dos direcciones"
-
-
-def test_sobre_el_diario_cada_vela_lleva_el_estado_h4_del_dia(drawn: dict) -> None:
-    """Para recorrer varios días seguidos sin abrir H4 uno a uno."""
-    diario = _step(drawn, "h4-en-el-diario")
-    marcas = _estado_diario(diario)
-
-    assert marcas is not None, "el diario tiene que llevar la marca de estado"
-    assert marcas["points"] > 1
-    # Y nada de la capa de H4 dibujado encima del precio: sólo la marca.
-    assert diario["plot"]["h4"] == []
-    assert _h4_marcas(diario) is None
-
-
-def test_en_replay_el_estado_no_se_adelanta_al_reloj(drawn: dict) -> None:
-    """La vela H4 en formación no puede pintar ni un tramo de fondo."""
-    for etiqueta in ("h4-replay-inicio", "h4-replay-paso"):
-        paso = _step(drawn, etiqueta)
-        assert paso["h4MaxX"] is not None, f"«{etiqueta}» no dibuja nada de la capa H4"
-        assert paso["h4MaxX"][:16] <= _reloj(paso)
-
-
-def test_el_replay_solo_ensena_los_rangos_h4_ya_confirmados(drawn: dict) -> None:
-    replay = _h4_shapes(_step(drawn, "h4-replay-inicio"), "crt-h4-rango-")
-    completo = _h4_shapes(_step(drawn, "h4-en-su-temporalidad"), "crt-h4-rango-")
-    assert len(replay) < len(completo)
-
-
-def test_la_venda_tapa_tambien_el_enfoque(drawn: dict) -> None:
-    ciega = _step(drawn, "ciega-en-h4")
-    revelada = _step(drawn, "ciega-en-h4-revelada")
-
-    assert ciega["plot"]["h4"] == []
-    assert ciega["h4State"] == "| H4: TAPADO"
-    assert revelada["plot"]["h4"], "al revelar tienen que aparecer"
 
 
 # --- La caja simulada ------------------------------------------------------------

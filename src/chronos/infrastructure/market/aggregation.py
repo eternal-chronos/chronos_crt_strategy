@@ -1,4 +1,4 @@
-"""Agregación M1 → H4 y M1 → Diario con offset configurable (§1.2).
+"""Agregación M1 → H3/H4/H6/H12/Diario con offset configurable (§1.2).
 
 El resultado del módulo depende íntegramente del offset: nada aquí está fijado
 en el código, y cambiar `h4_offset_hours` o `d_session_start` cambia las velas
@@ -24,7 +24,10 @@ import pandas as pd
 from chronos.application.chart.config import (
     DAILY,
     H1,
+    H3,
     H4,
+    H6,
+    H12,
     M15,
     AggregationConfig,
     SessionAnchor,
@@ -35,8 +38,13 @@ from chronos.domain.errors import DomainError
 #: Paso que se asume cuando el histórico es demasiado corto para deducirlo.
 DEFAULT_BASE_STEP = pd.Timedelta(minutes=1)
 
-#: Duración de una vela H4 dentro de la sesión.
-H4_STEP = pd.Timedelta(hours=4)
+#: Duración de cada trozo de sesión: H3, H4, H6 y H12 son la sesión troceada.
+SESSION_STEPS: dict[str, pd.Timedelta] = {
+    H3: pd.Timedelta(hours=3),
+    H4: pd.Timedelta(hours=4),
+    H6: pd.Timedelta(hours=6),
+    H12: pd.Timedelta(hours=12),
+}
 
 _AGGREGATION: dict[Hashable, Any] = {
     "open": "first",
@@ -65,7 +73,11 @@ class AggregatedSeries:
         if self.session is not None:
             return (
                 f"{self.timeframe}: sesión que abre a las {self.session.describe()}"
-                + (", troceada cada 4 h" if self.timeframe == H4 else "")
+                + (
+                    f", troceada cada {_humanize(SESSION_STEPS[self.timeframe])}"
+                    if self.timeframe in SESSION_STEPS
+                    else ""
+                )
             )
         offset = self.offset.total_seconds() / 3600.0
         return f"{self.timeframe}: freq={self.freq}, offset={offset:g} h desde 00:00 UTC"
@@ -151,12 +163,13 @@ def aggregate(
 def _anchor_for(timeframe: str, config: AggregationConfig) -> SessionAnchor | None:
     """Ancla de sesión aplicable a esta temporalidad.
 
-    Sólo el diario y H4 se anclan a la sesión: la rejilla de M15 y H1 —cuartos de
-    hora y horas en punto— es la misma en todas las plataformas y no depende de
-    dónde empiece el día. Cuando hay ancla, `h4_offset_hours` no pinta nada: H4
-    arranca con la sesión, que es lo que hace la plataforma del propietario.
+    Sólo el diario, H12, H6, H4 y H3 se anclan a la sesión: la rejilla de M15 y H1
+    —cuartos de hora y horas en punto— es la misma en todas las plataformas y no
+    depende de dónde empiece el día. Cuando hay ancla, `h4_offset_hours` no pinta
+    nada: H3, H4, H6 y H12 arrancan con la sesión, que es lo que hace la plataforma del
+    propietario.
     """
-    if timeframe not in (DAILY, H4):
+    if timeframe not in (DAILY, H12, H6, H4, H3):
         return None
     return config.session_anchor
 
@@ -186,34 +199,13 @@ def session_buckets(
     if timeframe == DAILY:
         return starts, next_starts
 
-    steps = (index - starts) // H4_STEP
-    labels = pd.DatetimeIndex(starts + pd.to_timedelta(steps * 4, unit="h"))
-    # El último trozo de una sesión de 23 o 25 horas no llega a las 4 horas.
-    closing = labels + H4_STEP
+    piece = SESSION_STEPS[timeframe]
+    steps = (index - starts) // piece
+    labels = pd.DatetimeIndex(starts + steps * piece)
+    # El último trozo de una sesión de 23 o 25 horas se queda corto.
+    closing = labels + piece
     ends = pd.DatetimeIndex(closing.where(closing < next_starts, next_starts))
     return labels, ends
-
-
-def bar_closes(
-    labels: pd.DatetimeIndex, timeframe: str, config: AggregationConfig
-) -> pd.DatetimeIndex:
-    """Instante en que cierra cada vela ya agregada, a partir de su etiqueta.
-
-    Las velas van etiquetadas al INICIO de su intervalo, así que la etiqueta no
-    dice cuándo se supo lo que hay dentro. Quien tenga que decidir si una vela ya
-    había cerrado a una hora —el replay, sin ir más lejos— necesita esto.
-
-    Con ancla de sesión no vale sumar 24 horas: los dos días del año en que se
-    mueve el reloj la sesión dura 23 o 25, y ahí la cuenta a mano adelantaría o
-    atrasaría el cierre una hora. Se resuelve con la misma rejilla que agregó las
-    velas.
-    """
-    anchor = _anchor_for(timeframe, config)
-    if anchor is None:
-        _freq, _offset, span = _bins(timeframe, config)
-        return pd.DatetimeIndex(pd.DatetimeIndex(labels) + span)
-    _starts, ends = session_buckets(pd.DatetimeIndex(labels), timeframe, anchor)
-    return ends
 
 
 def _localized(naive: pd.DatetimeIndex, anchor: SessionAnchor) -> pd.DatetimeIndex:
@@ -284,13 +276,22 @@ def _bins(timeframe: str, config: AggregationConfig) -> tuple[str, pd.Timedelta,
     """Frecuencia, desplazamiento y duración del intervalo de una temporalidad.
 
     M15 y H1 no llevan desplazamiento: su rejilla —cuartos de hora y horas en
-    punto— es la misma en todas las plataformas. Sólo H4 y el diario admiten
+    punto— es la misma en todas las plataformas. H3, H4, H6, H12 y el diario admiten
     ajuste, que es donde discrepan.
     """
     if timeframe == M15:
         return "15min", pd.Timedelta(0), pd.Timedelta(minutes=15)
     if timeframe == H1:
         return "1h", pd.Timedelta(0), pd.Timedelta(hours=1)
+    if timeframe == H3:
+        # Sin ancla de sesión, H3 trocea el día desde su hora de arranque: con
+        # el día a las 22:00 UTC, las velas abren a las 22:00, 01:00, 04:00...
+        start = config.session_start_time()
+        return (
+            "3h",
+            pd.Timedelta(hours=start.hour % 3, minutes=start.minute),
+            pd.Timedelta(hours=3),
+        )
     if timeframe == H4:
         # El desplazamiento sólo tiene sentido dentro del ciclo de 4 horas:
         # un offset de 5 h produce exactamente las mismas velas que uno de 1 h.
@@ -298,6 +299,24 @@ def _bins(timeframe: str, config: AggregationConfig) -> tuple[str, pd.Timedelta,
             "4h",
             pd.Timedelta(hours=config.h4_effective_offset_hours),
             pd.Timedelta(hours=4),
+        )
+    if timeframe == H6:
+        # Sin ancla de sesión, H6 trocea el día desde su hora de arranque: con
+        # el día a las 22:00 UTC, las velas abren a las 22:00, 04:00, 10:00...
+        start = config.session_start_time()
+        return (
+            "6h",
+            pd.Timedelta(hours=start.hour % 6, minutes=start.minute),
+            pd.Timedelta(hours=6),
+        )
+    if timeframe == H12:
+        # Sin ancla de sesión, H12 parte el día por su hora de arranque: con el
+        # día a las 22:00 UTC, las velas abren a las 22:00 y a las 10:00.
+        start = config.session_start_time()
+        return (
+            "12h",
+            pd.Timedelta(hours=start.hour % 12, minutes=start.minute),
+            pd.Timedelta(hours=12),
         )
     if timeframe == DAILY:
         start = config.session_start_time()

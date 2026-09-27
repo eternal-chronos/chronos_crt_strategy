@@ -1,43 +1,166 @@
-"""Cuándo cierra cada vela agregada.
+"""H12: la sesión partida en dos, igual que H4 la parte en seis.
 
-Las velas van etiquetadas al INICIO de su intervalo, así que su marca no dice
-cuándo se supo lo que hay dentro. Todo lo que decide «esto ya se sabía» —el
-replay, y con él los rangos CRT— depende de esta cuenta, y con ancla de sesión
-no es sumar 24 horas: los dos días del año en que se mueve el reloj de la plaza
-la sesión dura 23 o 25.
+Con el día anclado a las 17:00 de Nueva York, las velas H12 abren a las 17:00 y
+a las 05:00 locales todo el año. En UTC eso se mueve una hora dos veces al año,
+y el día del cambio de reloj la segunda mitad dura 11 o 13 horas, no 12.
+
+H3 es lo mismo en ocho trozos: abre a las 17:00, 20:00, 23:00, 02:00, 05:00...
+locales. La vela de las 02:00 de Nueva York es la que abre la ventana operativa.
+H6, en cuatro: 17:00, 23:00, 05:00 y 11:00 locales.
 """
 
 from __future__ import annotations
 
+import numpy as np
 import pandas as pd
 
-from chronos.application.chart.config import DAILY, AggregationConfig
-from chronos.infrastructure.market.aggregation import bar_closes
+from chronos.application.chart.config import DAILY, H3, H6, H12, AggregationConfig
+from chronos.infrastructure.market.aggregation import aggregate, session_buckets
 
 
-def test_con_hora_fija_en_utc_el_dia_dura_siempre_24_horas() -> None:
-    config = AggregationConfig(d_session_start="22:00")
-    labels = pd.DatetimeIndex(["2024-03-08 22:00", "2024-03-09 22:00"], tz="UTC")
+def _m1(start: str, end: str) -> pd.DataFrame:
+    index = pd.date_range(start, end, freq="1min", tz="UTC", inclusive="left")
+    price = 100.0 + np.arange(len(index), dtype=float) / 1000.0
+    return pd.DataFrame(
+        {"open": price, "high": price + 0.5, "low": price - 0.5, "close": price, "volume": 1.0},
+        index=index,
+    )
 
-    closes = bar_closes(labels, DAILY, config)
 
-    assert list(closes) == [
+def test_con_ancla_de_ny_h12_abre_a_las_17_y_a_las_05_locales() -> None:
+    # Enero, sin horario de verano: NY = UTC-5, así que 17:00 NY son las 22:00 UTC.
+    frame = _m1("2024-01-08 22:00", "2024-01-10 22:00")
+
+    series = aggregate(frame, H12, AggregationConfig(d_session_start="NY_17:00"))
+
+    labels = list(series.frame.index)
+    assert labels == [
+        pd.Timestamp("2024-01-08 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 10:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-10 10:00", tz="UTC"),
+    ]
+    assert "troceada cada 12 h" in series.description
+
+
+def test_dos_velas_h12_hacen_la_vela_diaria() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-10 22:00")
+    config = AggregationConfig(d_session_start="NY_17:00")
+
+    half = aggregate(frame, H12, config).frame
+    daily = aggregate(frame, DAILY, config).frame
+
+    for position, day in enumerate(daily.index):
+        pair = half.iloc[2 * position : 2 * position + 2]
+        assert pair.index[0] == day
+        assert pair["open"].iloc[0] == daily.loc[day, "open"]
+        assert pair["close"].iloc[-1] == daily.loc[day, "close"]
+        assert pair["high"].max() == daily.loc[day, "high"]
+        assert pair["low"].min() == daily.loc[day, "low"]
+
+
+def test_el_dia_del_cambio_de_hora_la_segunda_mitad_dura_11() -> None:
+    """El 10 de marzo de 2024 Nueva York adelanta el reloj: la sesión dura 23 h."""
+    anchor = AggregationConfig(d_session_start="NY_17:00").session_anchor
+    assert anchor is not None
+    # Sesión del sábado 9 a las 17:00 EST (22:00 UTC) al domingo 10 a las 17:00
+    # EDT (21:00 UTC).
+    stamps = pd.DatetimeIndex(
+        ["2024-03-09 22:00", "2024-03-10 10:00", "2024-03-10 20:59"], tz="UTC"
+    )
+
+    labels, ends = session_buckets(stamps, H12, anchor)
+
+    assert list(labels) == [
         pd.Timestamp("2024-03-09 22:00", tz="UTC"),
-        pd.Timestamp("2024-03-10 22:00", tz="UTC"),
+        pd.Timestamp("2024-03-10 10:00", tz="UTC"),
+        pd.Timestamp("2024-03-10 10:00", tz="UTC"),
+    ]
+    assert ends[1] == pd.Timestamp("2024-03-10 21:00", tz="UTC")  # 11 h
+
+
+def test_sin_ancla_h12_parte_el_dia_por_su_hora_de_arranque() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-09 22:00")
+
+    series = aggregate(frame, H12, AggregationConfig(d_session_start="22:00"))
+
+    assert list(series.frame.index) == [
+        pd.Timestamp("2024-01-08 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 10:00", tz="UTC"),
     ]
 
 
-def test_con_ancla_de_sesion_el_dia_del_cambio_de_hora_dura_23() -> None:
-    """La sesión abre a la misma hora LOCAL, así que en UTC el corte se mueve.
+def test_con_ancla_de_ny_h3_abre_cada_tres_horas_desde_las_17_locales() -> None:
+    # Julio, con horario de verano: NY = UTC-4, así que 17:00 NY son las 21:00 UTC.
+    frame = _m1("2024-07-08 21:00", "2024-07-09 21:00")
 
-    El 10 de marzo de 2024 Nueva York adelanta el reloj a las 2:00. La sesión
-    que abre ese día a las 00:00 locales cierra 23 horas después, no 24, y
-    sumarle un día la dejaría una hora larga.
-    """
-    config = AggregationConfig(d_session_start="NY_00:00")
-    labels = pd.DatetimeIndex(["2024-03-09 05:00", "2024-03-10 05:00"], tz="UTC")
+    series = aggregate(frame, H3, AggregationConfig(d_session_start="NY_17:00"))
 
-    closes = bar_closes(labels, DAILY, config)
+    local = [stamp.tz_convert("America/New_York").strftime("%H:%M") for stamp in series.frame.index]
+    assert local == ["17:00", "20:00", "23:00", "02:00", "05:00", "08:00", "11:00", "14:00"]
+    assert "troceada cada 3 h" in series.description
 
-    assert closes[0] == pd.Timestamp("2024-03-10 05:00", tz="UTC")  # 24 h
-    assert closes[1] == pd.Timestamp("2024-03-11 04:00", tz="UTC")  # 23 h
+
+def test_ocho_velas_h3_hacen_la_vela_diaria() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-10 22:00")
+    config = AggregationConfig(d_session_start="NY_17:00")
+
+    pieces = aggregate(frame, H3, config).frame
+    daily = aggregate(frame, DAILY, config).frame
+
+    for position, day in enumerate(daily.index):
+        group = pieces.iloc[8 * position : 8 * position + 8]
+        assert group.index[0] == day
+        assert group["open"].iloc[0] == daily.loc[day, "open"]
+        assert group["close"].iloc[-1] == daily.loc[day, "close"]
+        assert group["high"].max() == daily.loc[day, "high"]
+        assert group["low"].min() == daily.loc[day, "low"]
+
+
+def test_sin_ancla_h3_trocea_el_dia_desde_su_hora_de_arranque() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-09 04:00")
+
+    series = aggregate(frame, H3, AggregationConfig(d_session_start="22:00"))
+
+    assert list(series.frame.index) == [
+        pd.Timestamp("2024-01-08 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 01:00", tz="UTC"),
+    ]
+
+
+def test_con_ancla_de_ny_h6_abre_cada_seis_horas_desde_las_17_locales() -> None:
+    # Julio, con horario de verano: NY = UTC-4, así que 17:00 NY son las 21:00 UTC.
+    frame = _m1("2024-07-08 21:00", "2024-07-09 21:00")
+
+    series = aggregate(frame, H6, AggregationConfig(d_session_start="NY_17:00"))
+
+    local = [stamp.tz_convert("America/New_York").strftime("%H:%M") for stamp in series.frame.index]
+    assert local == ["17:00", "23:00", "05:00", "11:00"]
+    assert "troceada cada 6 h" in series.description
+
+
+def test_cuatro_velas_h6_hacen_la_vela_diaria() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-10 22:00")
+    config = AggregationConfig(d_session_start="NY_17:00")
+
+    pieces = aggregate(frame, H6, config).frame
+    daily = aggregate(frame, DAILY, config).frame
+
+    for position, day in enumerate(daily.index):
+        group = pieces.iloc[4 * position : 4 * position + 4]
+        assert group.index[0] == day
+        assert group["open"].iloc[0] == daily.loc[day, "open"]
+        assert group["close"].iloc[-1] == daily.loc[day, "close"]
+        assert group["high"].max() == daily.loc[day, "high"]
+        assert group["low"].min() == daily.loc[day, "low"]
+
+
+def test_sin_ancla_h6_trocea_el_dia_desde_su_hora_de_arranque() -> None:
+    frame = _m1("2024-01-08 22:00", "2024-01-09 10:00")
+
+    series = aggregate(frame, H6, AggregationConfig(d_session_start="22:00"))
+
+    assert list(series.frame.index) == [
+        pd.Timestamp("2024-01-08 22:00", tz="UTC"),
+        pd.Timestamp("2024-01-09 04:00", tz="UTC"),
+    ]

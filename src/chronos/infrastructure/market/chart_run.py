@@ -83,7 +83,7 @@ def load_symbol(config: ExplorerConfig, symbol: SymbolConfig) -> SymbolBars:
     history = load_history(symbol, config.price_side)
     series: dict[str, AggregatedSeries] = {}
     skipped: list[str] = []
-    for timeframe in config.ordered_timeframes:
+    for timeframe in config.timeframes_for(symbol):
         try:
             series[timeframe] = aggregate(history.frame, timeframe, config.aggregation)
         except DomainError as error:

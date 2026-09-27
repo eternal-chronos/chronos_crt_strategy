@@ -131,14 +131,14 @@ function pressKey(key, focusedTag) {
 
 /* Lo que NO ha puesto una mano. Las velas y la vela en formación son precio;
  * todo lo demás es calculado y se apunta con su nombre en `calculated`. Hoy la
- * única capa calculada son los rangos CRT diarios: cualquier otra, el test la
- * señala. */
+ * única capa calculada es la caja de las 02:00 en H3: cualquier otra, el test
+ * la señala. */
 function priceLayer(name) {
   return /^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
 
-function rangeLayer(name) {
-  return /^Rangos CRT diarios · (bajistas|alcistas)$/.test(name || '');
+function boxLayer(name) {
+  return /^Caja de las 02:00 · (rango bajista|rango alcista|vela)$/.test(name || '');
 }
 
 function simShape(shape) {
@@ -187,18 +187,20 @@ global.Plotly = {
       // Todo lo que no es precio: lo ha calculado alguien.
       calculated: traces.filter(function (trace) { return !priceLayer(trace.name); })
         .map(function (trace) { return trace.name; }),
-      // Los rangos: cuántos rectángulos (cinco vértices y un corte cada uno) y
-      // el punto más a la derecha, que en replay no puede pasar del reloj.
-      ranges: traces.filter(function (trace) { return rangeLayer(trace.name); })
+      // Las cajas: cuántos rectángulos (cinco vértices y un corte cada uno), sus
+      // vértices y el punto más a la derecha, que en replay no puede pasar del reloj.
+      boxes: traces.filter(function (trace) { return boxLayer(trace.name); })
         .map(function (trace) {
           const xs = (trace.x || []).filter(function (value) { return value; });
           return {
             name: trace.name,
-            boxes: (trace.x || []).filter(function (value) { return value === null; }).length,
+            count: (trace.x || []).filter(function (value) { return value === null; }).length,
+            x: trace.x.slice(),
+            y: trace.y.slice(),
             maxX: xs.length ? xs.slice().sort()[xs.length - 1] : null,
             fill: trace.fill || null,
             color: (trace.line && trace.line.color) || null,
-            caption: trace.text && trace.text[0],
+            captions: (trace.text || []).filter(function (value) { return value; }),
           };
         }),
       traces: traces.map(function (trace) {
@@ -436,6 +438,11 @@ if (payload.symbols.length > 1) {
   selectSymbol(payload.symbols[1].id);
   steps.push(snapshot('replay-otro-par'));
   selectSymbol(payload.symbols[0].id);
+}
+// En H3, la capa calculada: tampoco puede pasar del reloj.
+if (payload.symbols[0].charts.indexOf('H3') >= 0) {
+  selectChart('H3');
+  steps.push(snapshot('replay-en-h3'));
 }
 selectChart(h4);
 
@@ -771,6 +778,8 @@ elements['line-clear'].fire('click');
 steps.push(snapshot('marcas-limpias'));
 
 // --- Auditoría ciega -----------------------------------------------------------
+// En H3, donde hay capa calculada que ocultar.
+if (payload.symbols[0].charts.indexOf('H3') >= 0) { selectChart('H3'); }
 elements['blind-seed'].value = '12345';
 elements['blind-seed'].fire('change', {});
 elements['blind-start'].fire('click');

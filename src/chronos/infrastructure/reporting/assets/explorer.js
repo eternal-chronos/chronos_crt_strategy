@@ -2,9 +2,9 @@
  *
  * El chasis del gráfico: velas o cierres, cuatro temporalidades, cuatro pares,
  * ventana de fechas, zoom, replay y las herramientas con las que el propietario
- * marca a mano encima del precio. Encima, UNA capa calculada: los rangos CRT del
- * diario, que llegan resueltos del motor y aquí sólo se pintan, con su propia
- * traza, su entrada en la leyenda y su línea en el estado.
+ * marca a mano encima del precio. Encima, UNA capa calculada: la caja de las
+ * 02:00 NY en H3, que llega resuelta del motor y aquí sólo se pinta, con su
+ * propia traza, su entrada en la leyenda y su línea en el estado.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
  * con Plotly.react. Es más barato de razonar que llevar la cuenta de índices de
@@ -251,8 +251,8 @@
 
   /* Con la venda puesta no se dibuja nada más que las velas: es el punto de la
    * prueba —mirar el gráfico pelado antes de ver lo que marcaste— y por eso el
-   * apagón se hace en un único sitio: alcanza a los rangos CRT calculados, que
-   * no se ven hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
+   * apagón se hace en un único sitio: alcanza a la caja de las 02:00 calculada, que
+   * no se ve hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
   function blindfolded() { return state.blind && !state.revealed; }
 
   function rgba(hex, alpha) {
@@ -302,77 +302,96 @@
     return traces;
   }
 
-  // --- Rangos CRT diarios (capa calculada) --------------------------------------
+  // --- Caja de las 02:00 en H3 (capa calculada) ---------------------------------
 
-  /* Los rangos llegan RESUELTOS del motor: cuándo nació cada uno, sus extremos y
-   * la vela que lo frenó. Aquí no se decide nada: se elige qué parte se enseña.
+  /* Las cajas llegan RESUELTAS del motor: de qué vela sale cada una, cuándo se
+   * sabe y si la vela de las 02:00 la sustituyó. Aquí no se decide nada: se
+   * elige qué parte se enseña.
    *
-   * Sólo en el Diario, que es donde se calculan, y SÓLO EL QUE SIGUE VIVO: uno
-   * que ya se frenó, por lo que sea, deja de importar y no se dibuja. Vivo quiere
-   * decir vivo al cierre de la última vela a la vista, así que en replay se ve
-   * el que estaba vivo en ese momento aunque muera después, y ninguno antes de
-   * que cierre su vela de confirmación. Se dibuja desde la vela 1 hasta ese
-   * cierre. El motor sólo deja uno vivo a la vez. */
-  var RANGE_CHART = "D";
-  var RANGE_NAMES = { bearish: "Rangos CRT diarios · bajistas", bullish: "Rangos CRT diarios · alcistas" };
+   * Sólo en H3, que es donde se calculan; en el Diario, H12 y H6 no se dibuja
+   * nada calculado. Y SÓLO LA ACTUAL: la última que se sabe al cierre de la
+   * última vela a la vista. Las de días anteriores, y la que sustituyó la vela
+   * de las 02:00, no se dibujan. Una caja existe desde el cierre de la vela que
+   * la hace existir —la anterior a las 02:00, o la de las 02:00 si cerró fuera—
+   * y se dibuja desde su vela hasta las 12:00 NY; en replay, hasta el reloj. */
+  var BOX_CHART = "H3";
+  var BOX_NAMES = {
+    bearish: "Caja de las 02:00 · rango bajista",
+    bullish: "Caja de las 02:00 · rango alcista",
+    candle: "Caja de las 02:00 · vela"
+  };
 
-  function rangesShown() { return state.chart === RANGE_CHART && !blindfolded(); }
+  function boxesShown() { return state.chart === BOX_CHART && !blindfolded(); }
 
-  /* Los rangos vivos al cierre de la última vela del tramo. */
-  function visibleRanges(cut) {
+  /* La caja actual: la última que se sabe al cierre de la última vela del
+   * tramo, si cae en él. Las cajas llegan en orden. */
+  function visibleBoxes(cut) {
     var b = bars();
-    if (!rangesShown() || cut.end <= cut.start) { return []; }
-    var daySpan = span(RANGE_CHART);
+    if (!boxesShown() || cut.end <= cut.start) { return []; }
+    var step = span(BOX_CHART);
     var lo = b.t[cut.start];
-    var edge = b.t[cut.end - 1] + daySpan;   // cierre de la última vela a la vista
-    return (sym().ranges || []).filter(function (r) {
-      return r.confirm + daySpan <= edge && (r.end === null || r.end + daySpan > edge);
-    }).map(function (r) {
-      // Uno que nació antes del tramo se recorta a su borde: si no, estiraría el
-      // eje hacia fechas que no se están mirando.
-      return { range: r, from: Math.max(r.ref, lo), to: edge };
-    });
+    var edge = b.t[cut.end - 1] + step;   // cierre de la última vela a la vista
+    var known = (sym().boxes || []).filter(function (box) { return box.known + step <= edge; });
+    var box = known[known.length - 1];
+    if (!box) { return []; }
+    // Una que empezó antes del tramo se recorta a su borde: si no, estiraría el
+    // eje hacia fechas que no se están mirando.
+    var item = { box: box, from: Math.max(box.ref, lo), to: Math.min(box.until, edge) };
+    return item.to > item.from ? [item] : [];
   }
 
-  function rangeTraces(cut) {
-    var shown = visibleRanges(cut);
-    return ["bearish", "bullish"].map(function (dir) {
+  function boxGroup(box) { return box.kind === "rango" ? box.dir : "candle"; }
+
+  function boxOrigin(box) {
+    if (box.kind === "rango") {
+      return "rango CRT " + (box.dir === "bearish" ? "bajista" : "alcista") +
+        " vivo antes de las 02:00 NY · vela 1 " + stamp(box.ref);
+    }
+    if (box.kind === "vela_previa") {
+      return "sin rango vivo antes de las 02:00 NY: la vela anterior, " + stamp(box.ref);
+    }
+    return "la vela de las 02:00 NY, " + stamp(box.ref) + ", que cerró fuera de la caja";
+  }
+
+  function boxTraces(cut) {
+    var shown = visibleBoxes(cut);
+    return ["bearish", "bullish", "candle"].map(function (group) {
       var x = [], y = [], text = [];
-      shown.filter(function (item) { return item.range.dir === dir; }).forEach(function (item) {
-        var r = item.range;
-        var caption = (dir === "bearish" ? "Rango CRT bajista" : "Rango CRT alcista") +
-          " (calculado)<br>vela 1 " + stamp(r.ref) + " · confirma " + stamp(r.confirm) +
-          "<br>máximo " + price(r.high) + " · mínimo " + price(r.low) +
-          "<br>sigue vivo";
+      shown.filter(function (item) { return boxGroup(item.box) === group; }).forEach(function (item) {
+        var box = item.box;
+        var caption = "Caja de las 02:00 (calculada)<br>" + boxOrigin(box) +
+          "<br>máximo " + price(box.high) + " · mínimo " + price(box.low) +
+          "<br>vale hasta las 12:00 NY, " + stamp(box.until);
         [item.from, item.to, item.to, item.from, item.from].forEach(function (minute) { x.push(iso(minute)); });
-        [r.high, r.high, r.low, r.low, r.high].forEach(function (value) { y.push(value); });
+        [box.high, box.high, box.low, box.low, box.high].forEach(function (value) { y.push(value); });
         for (var i = 0; i < 5; i++) { text.push(caption); }
         x.push(null); y.push(null); text.push(null);
       });
       return {
-        type: "scatter", mode: "lines", name: RANGE_NAMES[dir],
-        x: x, y: y, fill: "toself", fillcolor: rgba(COLORS.ranges[dir], 0.12),
-        line: { color: COLORS.ranges[dir], width: 1.2 },
+        type: "scatter", mode: "lines", name: BOX_NAMES[group],
+        x: x, y: y, fill: "toself", fillcolor: rgba(COLORS.boxes[group], 0.12),
+        line: { color: COLORS.boxes[group], width: 1.2 },
         text: text, hoverinfo: "text", hoveron: "points+fills", hoverlabel: { align: "left" }
       };
     }).filter(function (trace) { return trace.x.length; });
   }
 
-  /* Qué se ve de la capa calculada y qué no. Se dice siempre: un Diario sin
-   * rango vivo no es lo mismo que un H4 donde no se dibujan. */
-  function rangeCaption(cut) {
-    if (state.chart !== RANGE_CHART) {
-      return "rangos CRT diarios (calculados): sólo se dibujan en el Diario";
+  /* Qué se ve de la capa calculada y qué no. Se dice siempre: un H3 sin cajas
+   * a la vista no es lo mismo que un Diario donde no se dibujan. */
+  function boxCaption(cut) {
+    if (state.chart !== BOX_CHART) {
+      return "caja de las 02:00 (calculada): sólo se dibuja en H3";
     }
     if (blindfolded()) {
-      return "rangos CRT diarios (calculados): ocultos hasta Revelar";
+      return "caja de las 02:00 (calculada): oculta hasta Revelar";
     }
-    var alive = visibleRanges(cut)[0];
-    return "rangos CRT diarios (calculados por el motor): sólo el vivo, los frenados no se " +
-      "dibujan · " + (alive
-        ? "vivo: " + (alive.range.dir === "bearish" ? "bajista" : "alcista") +
-          " de " + price(alive.range.low) + " a " + price(alive.range.high)
-        : "ninguno vivo");
+    var current = visibleBoxes(cut)[0];
+    return "caja de las 02:00 NY en H3 (calculada por el motor): el rango vivo antes de " +
+      "las 02:00, o la vela anterior si no hay; la sustituye la de las 02:00 si cierra " +
+      "fuera; vale hasta las 12:00 NY; sólo la actual, las anteriores no se dibujan · " +
+      (current
+        ? "actual: de " + price(current.box.low) + " a " + price(current.box.high)
+        : "ninguna a la vista");
   }
 
   /* La vela en formación. Se arma con las velas de la temporalidad inferior que
@@ -2195,7 +2214,7 @@
     var range = bounds();
     var cut = slice(range);
 
-    Plotly.react("chart", priceTraces(cut).concat(rangeTraces(cut)), layout(range), {
+    Plotly.react("chart", priceTraces(cut).concat(boxTraces(cut)), layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
       // Sin las herramientas de dibujo de Plotly: lo que se marca a mano son la
       // caja, los recuadros y las líneas de este explorador, que se numeran, se
@@ -2227,7 +2246,7 @@
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + sym().label + " · " +
         label(state.chart) + " · " + range.from + " → " + range.to + " · " +
         visible.toLocaleString("es-ES") + " velas. Marca lo que veas y pulsa Revelar. " +
-        rangeCaption(cut) + ". " +
+        boxCaption(cut) + ". " +
         "Sorteada dentro de " + state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
@@ -2260,7 +2279,7 @@
     // Lo que este explorador NO dibuja. Con el gráfico pelado, la ausencia de
     // marcas se lee como que ahí no pasó nada, y lo que pasa es que todavía no
     // hay quien lo calcule: eso hay que decirlo, no dejarlo suponer.
-    text += " · SIN ESTRATEGIA: no hay señales ni entradas. " + rangeCaption(cut) +
+    text += " · SIN ESTRATEGIA: no hay señales ni entradas. " + boxCaption(cut) +
       ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
     if (sym().skipped && sym().skipped.length) {
       text += " · temporalidades sin velas en " + sym().label + ": " +

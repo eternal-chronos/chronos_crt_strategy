@@ -7,10 +7,11 @@ y poder marcar encima.
 
 **No dibuja ninguna estrategia porque todavía no hay ninguna.** Lo que sale del
 payload son velas —cuatro pares, las temporalidades que la configuración pida—,
-los nombres con los que el propietario marca a mano y UNA capa calculada: los
-rangos CRT del diario (`domain/crt/ranges.py`). Se calculan aquí y el
-JavaScript sólo los pinta; el explorador separa en leyenda y estado lo que sale
-del motor de lo que pone una mano.
+los nombres con los que el propietario marca a mano y UNA capa calculada: la
+caja de las 02:00 de Nueva York en H3 (`domain/crt/decision_box.py`). Se
+calcula aquí y el JavaScript sólo la pinta; el explorador separa en leyenda y
+estado lo que sale del motor de lo que pone una mano. En el Diario, H12 y H6 no
+se dibuja nada calculado.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
 los puntos se componen en JavaScript y las marcas de tiempo viajan como minutos
@@ -30,13 +31,13 @@ import pandas as pd
 import plotly.offline as pyo
 
 from chronos.application.chart.config import (
-    DAILY,
+    H3,
     TIMEFRAME_KEYS,
     TIMEFRAME_LABELS,
     MarksConfig,
 )
+from chronos.domain.crt.decision_box import RANGE, decision_boxes
 from chronos.domain.crt.ranges import BULLISH as BULLISH_RANGE
-from chronos.domain.crt.ranges import crt_ranges
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.market.chart_run import ChartRun, SymbolBars
 from chronos.infrastructure.reporting import theme
@@ -57,9 +58,15 @@ BEARISH = theme.NEGATIVE
 #: que ha puesto una mano.
 HAND_COLORS: tuple[str, ...] = (theme.MAGENTA, theme.CYAN, theme.OLIVE)
 
-#: Los rangos CRT diarios, la capa que calcula el motor: azul el alcista y
-#: naranja el bajista. Ni el verde y el rojo de las velas ni un tono de la mano.
-RANGE_COLORS: dict[str, str] = {"bullish": theme.SERIES[0], "bearish": theme.SERIES[1]}
+#: La caja de las 02:00, la capa que calcula el motor: azul si es un rango
+#: alcista, naranja si es bajista y ámbar si es una vela (la anterior a las
+#: 02:00 o la de las 02:00). Ni el verde y el rojo de las velas ni un tono de la
+#: mano.
+BOX_COLORS: dict[str, str] = {
+    "bullish": theme.SERIES[0],
+    "bearish": theme.SERIES[1],
+    "candle": theme.SERIES[3],
+}
 
 #: Minuto cero de la escala de tiempos del explorador.
 _EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
@@ -120,7 +127,7 @@ def build_payload(
             #: —punteado allí, continuo aquí—, no el color.
             "rects": hand_colors(config.marks.rects),
             "lines": hand_colors(config.marks.lines),
-            "ranges": dict(RANGE_COLORS),
+            "boxes": dict(BOX_COLORS),
         },
         "labels": dict(TIMEFRAME_LABELS),
         "keys": {
@@ -169,39 +176,49 @@ def _symbol_payload(item: SymbolBars, max_bars: int) -> dict[str, Any]:
         },
         #: Temporalidades que el histórico no daba para construir, con el motivo.
         "skipped": list(item.skipped),
-        #: Rangos CRT del diario, calculados sobre TODAS sus velas aunque el
-        #: payload las recorte: un rango no puede depender de cuántas se embeban.
-        "ranges": _ranges_payload(frames[DAILY]) if DAILY in frames else [],
+        #: Cajas de las 02:00 en H3, calculadas sobre TODAS sus velas aunque el
+        #: payload las recorte: una caja no puede depender de cuántas se embeban.
+        "boxes": _boxes_payload(frames[H3]) if H3 in frames else [],
     }
 
 
-def _ranges_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
-    """Cada rango con las ETIQUETAS de sus velas, en minutos desde la época.
+def _boxes_payload(frame: pd.DataFrame) -> list[dict[str, Any]]:
+    """Cada caja con las ETIQUETAS de sus velas, en minutos desde la época.
 
     Viajan etiquetas y no cierres: el navegador sabe cuándo cierra cada vela
-    (`t + span`), con la misma cuenta con la que mueve el reloj del replay.
-    Viajan también los que ya se frenaron, aunque sólo se dibuje el vivo: en
-    replay hay que saber cuál estaba vivo en cada fecha.
+    (`t + span`), con la misma cuenta con la que mueve el reloj del replay. Así
+    no enseña una caja antes de que cierre la vela que la hace existir, ni dice
+    que la vela de las 02:00 la sustituyó antes de que esa vela cierre.
     """
-    ranges = crt_ranges(frame)
+    boxes = decision_boxes(frame)
     minutes = _epoch_minutes(pd.DatetimeIndex(frame.index))
+    until = _epoch_minutes(pd.DatetimeIndex(boxes["until"]))
     return [
         {
-            "dir": "bullish" if direction == BULLISH_RANGE else "bearish",
+            "kind": kind,
+            "dir": (
+                ("bullish" if direction == BULLISH_RANGE else "bearish") if kind == RANGE else None
+            ),
             "ref": minutes[reference],
-            "confirm": minutes[confirmation],
-            "end": minutes[end] if end >= 0 else None,
+            "known": minutes[known],
+            "decision": minutes[decision],
+            "until": until[position],
             "high": round(float(high), _PAYLOAD_DECIMALS),
             "low": round(float(low), _PAYLOAD_DECIMALS),
+            "replaced": bool(replaced),
         }
-        for direction, reference, confirmation, end, high, low in zip(
-            ranges["direction"].tolist(),
-            ranges["reference"].tolist(),
-            ranges["confirmation"].tolist(),
-            ranges["end"].tolist(),
-            ranges["high"].tolist(),
-            ranges["low"].tolist(),
-            strict=True,
+        for position, (kind, direction, reference, known, decision, high, low, replaced) in enumerate(
+            zip(
+                boxes["kind"].tolist(),
+                boxes["direction"].tolist(),
+                boxes["reference"].tolist(),
+                boxes["known"].tolist(),
+                boxes["decision"].tolist(),
+                boxes["high"].tolist(),
+                boxes["low"].tolist(),
+                boxes["replaced"].tolist(),
+                strict=True,
+            )
         )
     ]
 
@@ -273,8 +290,8 @@ def _subtitle(run: ChartRun) -> str:
     faltan = f" · sin embeber: {', '.join(run.unavailable)}" if run.unavailable else ""
     return (
         f"{pares} · lado {config.price_side} · día desde "
-        f"{config.aggregation.describe_daily_start()} · sin estrategia: velas, rangos CRT "
-        f"diarios calculados y lo que marques a mano{faltan}"
+        f"{config.aggregation.describe_daily_start()} · sin estrategia: velas, la caja de "
+        f"las 02:00 en H3 calculada y lo que marques a mano{faltan}"
     )
 
 

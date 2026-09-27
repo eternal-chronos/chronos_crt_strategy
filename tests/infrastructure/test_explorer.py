@@ -5,8 +5,8 @@ dibujar, así que lo que se comprueba aquí es doble:
 
   · que el CHASIS funciona —los cuatro pares, las temporalidades, la ventana, el
     replay, el zoom y las herramientas de mano—, y
-  · que lo único calculado que dibuja son los rangos CRT diarios, sólo en el
-    Diario, sin adelantarse al reloj del replay y separados de lo de la mano.
+  · que lo único calculado que dibuja es la caja de las 02:00, sólo en H3,
+    sin adelantarse al reloj del replay y separada de lo de la mano.
     Cualquier otra traza que no sean velas es un error, y el test lo dice con
     nombre.
 
@@ -48,9 +48,9 @@ from chronos.infrastructure.market.loader import SidedHistory
 from chronos.infrastructure.reporting.explorer import (
     ASSETS,
     BEARISH,
+    BOX_COLORS,
     BULLISH,
     HAND_COLORS,
-    RANGE_COLORS,
     bar_counts,
     build_payload,
     payload_size,
@@ -179,8 +179,8 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
     assert spans[DAILY] == 1440
 
 
-def test_la_unica_capa_calculada_del_payload_son_los_rangos_diarios(run: ChartRun) -> None:
-    """Velas y rangos CRT diarios, y nada más.
+def test_la_unica_capa_calculada_del_payload_es_la_caja_de_las_2(run: ChartRun) -> None:
+    """Velas y cajas de las 02:00 en H3, y nada más.
 
     Si un día aparece una clave que no sea de las de abajo, será porque alguien
     ha metido otra capa calculada y este test tiene que enterarse.
@@ -192,28 +192,34 @@ def test_la_unica_capa_calculada_del_payload_son_los_rangos_diarios(run: ChartRu
     for symbol in payload["symbols"]:
         assert set(symbol) == {
             "id", "label", "decimals", "side", "provenance",
-            "charts", "spans", "bars", "skipped", "ranges",
+            "charts", "spans", "bars", "skipped", "boxes",
         }
-        assert symbol["ranges"], f"{symbol['id']}: la fixture debería dar algún rango"
-        for rango in symbol["ranges"]:
-            assert set(rango) == {"dir", "ref", "confirm", "end", "high", "low"}
-            assert rango["dir"] in {"bullish", "bearish"}
-            assert rango["ref"] < rango["confirm"]
-            assert rango["end"] is None or rango["end"] > rango["confirm"]
-            assert rango["low"] < rango["high"]
+        if H3 not in symbol["charts"]:
+            assert symbol["boxes"] == [], f"{symbol['id']}: sin H3 no hay cajas"
+            continue
+        assert symbol["boxes"], f"{symbol['id']}: la fixture debería dar alguna caja"
+        tipos = {caja["kind"] for caja in symbol["boxes"]}
+        assert tipos == {"rango", "vela_previa", "ruptura"}, "la fixture debería dar los tres tipos"
+        for caja in symbol["boxes"]:
+            assert set(caja) == {
+                "kind", "dir", "ref", "known", "decision", "until", "high", "low", "replaced"
+            }
+            assert (caja["dir"] in {"bullish", "bearish"}) == (caja["kind"] == "rango")
+            assert caja["ref"] <= caja["known"] <= caja["decision"] < caja["until"]
+            assert caja["low"] <= caja["high"]
 
 
-def test_los_rangos_se_calculan_con_todo_el_diario_aunque_se_recorte(run: ChartRun) -> None:
-    """Cuántas velas se embeben no puede cambiar qué rangos hay."""
+def test_las_cajas_se_calculan_con_todo_h3_aunque_se_recorte(run: ChartRun) -> None:
+    """Cuántas velas se embeben no puede cambiar qué cajas hay."""
     corto = _config(reporting=ExplorerReportingConfig(max_explorer_bars=5))
-    completo = build_payload(run)["symbols"][0]["ranges"]
-    recortado = build_payload(replace(run, config=corto))["symbols"][0]["ranges"]
+    completo = build_payload(run)["symbols"][0]["boxes"]
+    recortado = build_payload(replace(run, config=corto))["symbols"][0]["boxes"]
     assert recortado == completo
 
 
-def test_los_colores_de_los_rangos_no_son_ni_de_velas_ni_de_la_mano() -> None:
-    colores = set(RANGE_COLORS.values())
-    assert len(colores) == 2
+def test_los_colores_de_las_cajas_no_son_ni_de_velas_ni_de_la_mano() -> None:
+    colores = set(BOX_COLORS.values())
+    assert len(colores) == 3
     assert not colores & {BULLISH, BEARISH, *HAND_COLORS}
 
 
@@ -330,85 +336,104 @@ def test_el_explorador_se_dibuja_sin_errores(drawn: dict) -> None:
     assert _step(drawn, "todo")["plot"]["target"] == "chart"
 
 
-RANGOS = {"Rangos CRT diarios · bajistas", "Rangos CRT diarios · alcistas"}
+CAJAS = {
+    "Caja de las 02:00 · rango bajista",
+    "Caja de las 02:00 · rango alcista",
+    "Caja de las 02:00 · vela",
+}
 
 
-def test_lo_unico_calculado_son_los_rangos_y_solo_en_el_diario(drawn: dict) -> None:
-    """Comprobado en cada paso del recorrido: fuera del Diario, sólo velas."""
+def test_lo_unico_calculado_es_la_caja_y_solo_en_h3(drawn: dict) -> None:
+    """Comprobado en cada paso del recorrido: fuera de H3, sólo velas. En el
+    Diario, H12 y H6 no se dibuja nada calculado."""
     for step in drawn["steps"]:
         calculadas = set(step["plot"]["calculated"])
-        assert calculadas <= RANGOS, (
-            f"en «{step['label']}» hay trazas que no son velas ni rangos: {calculadas - RANGOS}"
+        assert calculadas <= CAJAS, (
+            f"en «{step['label']}» hay trazas que no son velas ni cajas: {calculadas - CAJAS}"
         )
-        if step["chart"] != DAILY:
-            assert not calculadas, f"en «{step['label']}» ({step['chart']}) se dibujan rangos"
+        if step["chart"] != H3:
+            assert not calculadas, f"en «{step['label']}» ({step['chart']}) se dibujan cajas"
 
 
-def _vivos(symbol: dict, step: dict) -> list[dict]:
-    """Los rangos del payload vivos al cierre de la última vela a la vista."""
-    ultima = pd.Timestamp(step["plot"]["lastBar"], tz="UTC")
-    borde = int((ultima - pd.Timestamp("1970-01-01", tz="UTC")).total_seconds() // 60)
-    borde += symbol["spans"][DAILY]
-    dia = symbol["spans"][DAILY]
-    return [
-        r for r in symbol["ranges"]
-        if r["confirm"] + dia <= borde and (r["end"] is None or r["end"] + dia > borde)
-    ]
+def _minuto(texto: str) -> int:
+    return int((pd.Timestamp(texto, tz="UTC") - pd.Timestamp("1970-01-01", tz="UTC")).total_seconds() // 60)
 
 
-def test_solo_se_dibuja_el_rango_vivo(run: ChartRun, drawn: dict) -> None:
-    """Los que ya se frenaron, por lo que sea, no se dibujan: sólo el vivo al
-    cierre de la última vela a la vista —en replay, el vivo a esa fecha—."""
+def _cajas_esperadas(symbol: dict, step: dict) -> set[tuple[int, int, float, float]]:
+    """La caja actual —la última que se sabe al cierre de la última vela a la
+    vista—, como (desde, hasta, máximo, mínimo), si cae en el tramo."""
+    paso = symbol["spans"][H3]
+    inicio = _minuto(step["plot"]["firstBar"])
+    borde = _minuto(step["plot"]["lastBar"]) + paso
+    sabidas = [caja for caja in symbol["boxes"] if caja["known"] + paso <= borde]
+    if not sabidas:
+        return set()
+    caja = sabidas[-1]
+    desde, hasta = max(caja["ref"], inicio), min(caja["until"], borde)
+    return {(desde, hasta, caja["high"], caja["low"])} if hasta > desde else set()
+
+
+def _cajas_dibujadas(step: dict) -> set[tuple[int, int, float, float]]:
+    dibujadas = set()
+    for traza in step["plot"]["boxes"]:
+        for n in range(traza["count"]):
+            x, y = traza["x"][n * 6 : n * 6 + 5], traza["y"][n * 6 : n * 6 + 5]
+            dibujadas.add((_minuto(x[0]), _minuto(x[1]), y[0], y[2]))
+    return dibujadas
+
+
+def test_en_h3_se_dibujan_las_cajas_que_se_saben(run: ChartRun, drawn: dict) -> None:
+    """Fuera y dentro del replay, sólo la actual: las de días anteriores y la
+    sustituida por la vela de las 02:00 no se dibujan."""
     simbolos = {symbol["id"]: symbol for symbol in build_payload(run)["symbols"]}
     vistos = 0
     for step in drawn["steps"]:
-        if step["chart"] != DAILY or "ocultos hasta Revelar" in step["notes"]:
+        if step["chart"] != H3 or "oculta hasta Revelar" in step["notes"]:
             continue
-        symbol = simbolos[step["symbol"]]
-        assert any(r["end"] is not None for r in symbol["ranges"]), "la fixture debería frenar alguno"
-        vivos = _vivos(symbol, step)
-        esperados = {("Rangos CRT diarios · " + ("bajistas" if r["dir"] == "bearish" else "alcistas"))
-                     for r in vivos}
-        dibujados = step["plot"]["ranges"]
-        assert {r["name"] for r in dibujados} == esperados, f"«{step['label']}»"
-        assert sum(r["boxes"] for r in dibujados) == len(vivos) <= 1, f"«{step['label']}»"
-        for rango in dibujados:
-            assert "sigue vivo" in rango["caption"]
-        vistos += len(dibujados)
-    assert vistos, "algún paso del recorrido debería enseñar un rango vivo"
+        esperadas = _cajas_esperadas(simbolos[step["symbol"]], step)
+        assert _cajas_dibujadas(step) == esperadas, f"«{step['label']}»"
+        assert sum(traza["count"] for traza in step["plot"]["boxes"]) <= 1, f"«{step['label']}»"
+        vistos += len(esperadas)
+    assert vistos, "algún paso del recorrido debería enseñar cajas en H3"
 
 
-def test_los_rangos_van_rellenos_y_con_su_color(drawn: dict) -> None:
-    rangos = [r for step in drawn["steps"] for r in step["plot"]["ranges"]]
-    assert rangos
-    for rango in rangos:
-        sentido = "bearish" if rango["name"].endswith("bajistas") else "bullish"
-        assert rango["color"] == RANGE_COLORS[sentido]
-        assert rango["fill"] == "toself"
-        assert rango["boxes"] == 1
-        assert "(calculado)" in rango["caption"]
+def test_las_cajas_van_rellenas_con_su_color_y_su_origen(drawn: dict) -> None:
+    trazas = [t for step in drawn["steps"] for t in step["plot"]["boxes"]]
+    assert trazas
+    grupos = {"rango bajista": "bearish", "rango alcista": "bullish", "vela": "candle"}
+    for traza in trazas:
+        assert traza["color"] == BOX_COLORS[grupos[traza["name"].split(" · ")[1]]]
+        assert traza["fill"] == "toself"
+        for texto in traza["captions"]:
+            assert texto.startswith("Caja de las 02:00 (calculada)")
+            if traza["name"].endswith("vela"):
+                assert "la vela anterior" in texto or "cerró fuera de la caja" in texto
+            else:
+                assert "vivo antes de las 02:00 NY" in texto
 
 
-def test_el_replay_no_ensena_rangos_mas_alla_del_reloj(drawn: dict) -> None:
-    """Ni un rango antes de cerrar su vela de confirmación, ni estirado más allá."""
-    step = _step(drawn, "replay-en-el-mayor")
-    assert step["chart"] == DAILY
-    assert step["plot"]["ranges"], "el replay en el Diario debería enseñar algún rango"
-    for rango in step["plot"]["ranges"]:
-        assert rango["maxX"][:16] <= _reloj(step)
+def test_el_replay_no_ensena_cajas_mas_alla_del_reloj(drawn: dict) -> None:
+    """Ni una caja antes de cerrar su vela, ni estirada más allá del reloj."""
+    step = _step(drawn, "replay-en-h3")
+    assert step["chart"] == H3
+    assert step["plot"]["boxes"], "el replay en H3 debería enseñar alguna caja"
+    for traza in step["plot"]["boxes"]:
+        assert traza["maxX"][:16] <= _reloj(step)
 
 
-def test_la_auditoria_ciega_oculta_los_rangos_hasta_revelar(drawn: dict) -> None:
+def test_la_auditoria_ciega_oculta_las_cajas_hasta_revelar(drawn: dict) -> None:
     ciega = _step(drawn, "ciega")
-    assert ciega["chart"] == DAILY
+    assert ciega["chart"] == H3
     assert ciega["plot"]["calculated"] == []
-    assert "ocultos hasta Revelar" in ciega["notes"]
-    assert "ocultos hasta Revelar" not in _step(drawn, "ciega-revelada")["notes"]
+    assert "oculta hasta Revelar" in ciega["notes"]
+    revelada = _step(drawn, "ciega-revelada")
+    assert "oculta hasta Revelar" not in revelada["notes"]
+    assert revelada["plot"]["calculated"]
 
 
-def test_el_estado_dice_que_rangos_se_ven(drawn: dict) -> None:
-    assert "rangos CRT diarios (calculados por el motor)" in _step(drawn, "todo")["notes"]
-    assert "sólo se dibujan en el Diario" in _step(drawn, "grafico-H4")["notes"]
+def test_el_estado_dice_que_cajas_se_ven(drawn: dict) -> None:
+    assert "caja de las 02:00 NY en H3 (calculada por el motor)" in _step(drawn, "grafico-H3")["notes"]
+    assert "sólo se dibuja en H3" in _step(drawn, "todo")["notes"]
 
 
 def test_lo_unico_que_hay_en_shapes_lo_ha_puesto_una_mano(drawn: dict) -> None:
@@ -513,7 +538,7 @@ def test_las_flechas_mueven_la_ventana(drawn: dict) -> None:
 def test_la_vista_de_lineas_dibuja_una_sola_traza(drawn: dict) -> None:
     lineas = _step(drawn, "lineas")["plot"]
     velas = _step(drawn, "velas")["plot"]
-    precio = [trace for trace in lineas["traces"] if trace["name"] not in RANGOS]
+    precio = [trace for trace in lineas["traces"] if trace["name"] not in CAJAS]
     assert [trace["type"] for trace in precio] == ["scatter"]
     assert velas["traces"][0]["type"] == "candlestick"
 

@@ -15,9 +15,19 @@ estrategia corre sin cambios en backtest, paper y live**.
 **La estrategia está empezando.** Sobre el chasis —el histórico de cuatro
 pares (XAUUSD, EURUSD, GBPUSD y USDJPY), el explorador para mirarlos y marcar
 encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
-una primera pieza calculada: los rangos CRT diarios con su ciclo de vida
-(`domain/crt/ranges.py`), dibujados como capa propia sobre el Diario del
-explorador. El resto del flujo está en la sección siguiente, por programar.
+dos piezas calculadas: los rangos CRT con su ciclo de vida
+(`domain/crt/ranges.py`) y, encima de ellos, la **caja de las 02:00 NY en H3**
+(`domain/crt/decision_box.py`), la única capa calculada que dibuja el
+explorador. En D, 12H y 6H no se dibuja nada calculado.
+
+Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
+hay un rango CRT vivo en H3 la caja es su vela 1; si no, la vela anterior aunque
+no sea rango. Si la vela de las 02:00 **cierra** fuera de la caja (por arriba o
+por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
+(rechazo), la caja se mantiene. Vale hasta las 12:00 NY. El explorador sólo
+dibuja la actual; las anteriores no se ven.
+
+El resto del flujo está en la sección siguiente, por programar.
 
 Todo lo demás que se dibuje encima del precio lo ha puesto una mano, y el
 explorador lo dice.

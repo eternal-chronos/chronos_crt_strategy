@@ -266,17 +266,21 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
       por debajo de la apertura, sin ninguna otra lectura detrás</span>
     <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay señales ni entradas
-      calculadas. Lo único calculado son los rangos CRT diarios; todo lo demás que se ve encima
-      del precio lo pone tu mano, y el estado de abajo dice en cada dibujo qué es cada cosa.</span>
-    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
-      <i class="box" style="background:#2a78d6; opacity:.3"></i><b>Rangos CRT diarios</b>
-      (calculados por el motor, borde continuo): naranja el bajista, azul el alcista. Nace
-      cuando una vela le saca un extremo a la anterior y cierra dentro de ella; la caja es esa
-      vela anterior. Dura hasta que una vela le saca el extremo contrario a su anterior y lo
-      rechaza, cierra fuera de la caja o toca su otro extremo. Mientras hay uno vivo, otro del
-      mismo sentido no cuenta. <b>Sólo se dibuja el que sigue vivo</b>: los que ya se frenaron
-      no se ven. Sólo en el Diario; en replay, el vivo a esa fecha, desde que cerró la vela que
-      lo confirma; ocultos en la auditoría ciega hasta Revelar</span>
+      calculadas. Lo único calculado es la caja de las 02:00 en H3; todo lo demás que se ve encima
+      del precio lo pone tu mano, y el estado de abajo dice en cada dibujo qué es cada cosa.</spa    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
+      <i class="box" style="background:#2a78d6; opacity:.3"></i>
+      <i class="box" style="background:#eda100; opacity:.3"></i><b>Caja de las 02:00</b>
+      (calculada por el motor, borde continuo; sólo en H3). Un minuto antes de que abra la vela
+      de las 02:00 de Nueva York, si hay un rango CRT vivo en H3 la caja es ese rango (naranja
+      el bajista, azul el alcista); si no, es la vela anterior aunque no sea un rango (ámbar).
+      Si la vela de las 02:00 cierra fuera de la caja, por arriba o por abajo, al cerrar pasa a
+      ser ella la caja (ámbar); si sólo saca la mecha y cierra dentro, es rechazo y la caja se
+      mantiene. Vale hasta las 12:00 NY. <b>Sólo se dibuja la actual</b>: las de días
+      anteriores y la que sustituyó la vela de las 02:00 no se ven. En tu reloj UTC-4 esa vela sale a las 02:00 en verano
+      y a las 03:00 en invierno: es la misma. En el Diario, H12 y H6 no se dibuja nada
+      calculado. En replay, cada caja desde que cierra la vela que la hace existir; ocultas en
+      la auditoría ciega hasta Revelar</span>
+n>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra

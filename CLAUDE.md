@@ -15,10 +15,11 @@ estrategia corre sin cambios en backtest, paper y live**.
 **La estrategia está empezando.** Sobre el chasis —el histórico de cuatro
 pares (XAUUSD, EURUSD, GBPUSD y USDJPY), el explorador para mirarlos y marcar
 encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
-dos piezas calculadas: los rangos CRT con su ciclo de vida
-(`domain/crt/ranges.py`) y, encima de ellos, la **caja de las 02:00 NY en H3**
-(`domain/crt/decision_box.py`), la única capa calculada que dibuja el
-explorador. En D, 12H y 6H no se dibuja nada calculado.
+tres piezas calculadas: los rangos CRT con su ciclo de vida
+(`domain/crt/ranges.py`), encima de ellos la **caja de las 02:00 NY en H3**
+(`domain/crt/decision_box.py`), que el explorador dibuja en H3 y en H1, y la
+**señal de confirmación en H1** (`domain/crt/confirmation.py`), sólo en H1. En
+D, 12H, 6H, 4H y 15M no se dibuja nada calculado.
 
 Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
 hay un rango CRT vivo en H3 la caja es su vela 1; si no, la vela anterior aunque
@@ -29,6 +30,15 @@ precio toca un extremo y luego el otro** (en la misma vela o en velas
 distintas), no cuando la rompe: al cerrar, la vela que tocó el segundo extremo
 pasa a ser la caja, y así hasta las 12:00 NY (sólo cuentan velas que cierran a
 esa hora o antes). El explorador sólo dibuja la actual; las anteriores no se ven.
+
+Señal de confirmación en H1: con una vela de H3 abierta, cuando H1 **toca** un
+extremo de la caja vigente y una vela de H1 le hace **turtle soup** a la vela
+**inmediatamente anterior** en ese lado (le saca el extremo y cierra de vuelta,
+forme rango o no; barrer una de dos o más atrás no vale), se activa la señal:
+anticipa que la vela de H3 cerrará dentro de la caja. Da igual que ocurra fuera
+de la caja. Se marcan el extremo barrido y el otro extremo de la vela anterior.
+Cada vela de H3 empieza de cero, cuenta la primera señal de cada una, y sólo
+las velas de H1 que cierran a las 12:00 NY o antes.
 
 El resto del flujo está en la sección siguiente, por programar.
 

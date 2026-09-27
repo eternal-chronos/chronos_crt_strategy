@@ -130,15 +130,19 @@ function pressKey(key, focusedTag) {
 }
 
 /* Lo que NO ha puesto una mano. Las velas y la vela en formación son precio;
- * todo lo demás es calculado y se apunta con su nombre en `calculated`. Hoy la
- * única capa calculada es la caja de las 02:00 en H3: cualquier otra, el test
- * la señala. */
+ * todo lo demás es calculado y se apunta con su nombre en `calculated`. Hoy las
+ * capas calculadas son la caja de las 02:00 (H3 y H1) y la señal de H1:
+ * cualquier otra, el test la señala. */
 function priceLayer(name) {
   return /^(Velas |Cierres |Vela en formación)/.test(name || '');
 }
 
 function boxLayer(name) {
   return /^Caja de las 02:00 · (rango bajista|rango alcista|vela)$/.test(name || '');
+}
+
+function signalLayer(name) {
+  return /^Señal H1 · (línea del turtle soup|otro extremo|confirmación)$/.test(name || '');
 }
 
 function simShape(shape) {
@@ -200,6 +204,22 @@ global.Plotly = {
             maxX: xs.length ? xs.slice().sort()[xs.length - 1] : null,
             fill: trace.fill || null,
             color: (trace.line && trace.line.color) || null,
+            captions: (trace.text || []).filter(function (value) { return value; }),
+          };
+        }),
+      // La señal de H1: los segmentos de cada línea (dos puntos y un corte cada
+      // uno) y los triángulos.
+      signals: traces.filter(function (trace) { return signalLayer(trace.name); })
+        .map(function (trace) {
+          const xs = (trace.x || []).filter(function (value) { return value; });
+          return {
+            name: trace.name,
+            x: trace.x.slice(),
+            y: trace.y.slice(),
+            maxX: xs.length ? xs.slice().sort()[xs.length - 1] : null,
+            color: (trace.line && trace.line.color) || (trace.marker && trace.marker.color) || null,
+            dash: (trace.line && trace.line.dash) || null,
+            symbols: (trace.marker && trace.marker.symbol) || null,
             captions: (trace.text || []).filter(function (value) { return value; }),
           };
         }),
@@ -368,6 +388,12 @@ tabs().forEach(function (tab) {
 tabs()[0].fire('click');
 presets[0].fire('click');
 steps.push(snapshot('todo'));
+// H1 con todo el histórico: todas las señales del tramo.
+if (payload.symbols[0].charts.indexOf('H1') >= 0) {
+  selectChart('H1');
+  steps.push(snapshot('h1-todo'));
+  tabs()[0].fire('click');
+}
 presets[presets.length - 1].fire('click');
 steps.push(snapshot('preset-corto'));
 elements['prev'].fire('click');
@@ -443,6 +469,11 @@ if (payload.symbols.length > 1) {
 if (payload.symbols[0].charts.indexOf('H3') >= 0) {
   selectChart('H3');
   steps.push(snapshot('replay-en-h3'));
+}
+// En H1, la caja y la señal: tampoco pueden pasar del reloj.
+if (payload.symbols[0].charts.indexOf('H1') >= 0) {
+  selectChart('H1');
+  steps.push(snapshot('replay-en-h1'));
 }
 selectChart(h4);
 

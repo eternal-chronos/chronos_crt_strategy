@@ -2,9 +2,10 @@
  *
  * El chasis del gráfico: velas o cierres, cuatro temporalidades, cuatro pares,
  * ventana de fechas, zoom, replay y las herramientas con las que el propietario
- * marca a mano encima del precio. Encima, UNA capa calculada: la caja de las
- * 02:00 NY en H3, que llega resuelta del motor y aquí sólo se pinta, con su
- * propia traza, su entrada en la leyenda y su línea en el estado.
+ * marca a mano encima del precio. Encima, DOS capas calculadas: la caja de las
+ * 02:00 NY de H3, que se ve en H3 y en H1, y la señal de confirmación de H1,
+ * sólo en H1. Llegan resueltas del motor y aquí sólo se pintan, cada una con
+ * sus trazas, su entrada en la leyenda y su línea en el estado.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
  * con Plotly.react. Es más barato de razonar que llevar la cuenta de índices de
@@ -251,8 +252,8 @@
 
   /* Con la venda puesta no se dibuja nada más que las velas: es el punto de la
    * prueba —mirar el gráfico pelado antes de ver lo que marcaste— y por eso el
-   * apagón se hace en un único sitio: alcanza a la caja de las 02:00 calculada, que
-   * no se ve hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
+   * apagón se hace en un único sitio: alcanza a la caja de las 02:00 y a la señal
+   * de H1 calculadas, que no se ven hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
   function blindfolded() { return state.blind && !state.revealed; }
 
   function rgba(hex, alpha) {
@@ -308,21 +309,22 @@
    * sabe y cuál la sustituye. Aquí no se decide nada: se
    * elige qué parte se enseña.
    *
-   * Sólo en H3, que es donde se calculan; en el Diario, H12 y H6 no se dibuja
-   * nada calculado. Y SÓLO LA ACTUAL: la última que se sabe al cierre de la
+   * En H3, que es donde se calculan, y en H1, donde se busca la señal; en el
+   * resto no se dibuja nada calculado. Y SÓLO LA ACTUAL: la última que se sabe al cierre de la
    * última vela a la vista. Las de días anteriores y las sustituidas no se
    * dibujan. Una caja existe desde el cierre de la vela que
    * la hace existir —la anterior a las 02:00, la de las 02:00 si cerró fuera o
    * la que tocó el segundo extremo de la anterior— y se dibuja desde su vela
    * hasta las 12:00 NY; en replay, hasta el reloj. */
   var BOX_CHART = "H3";
+  var BOX_CHARTS = [BOX_CHART, "H1"];
   var BOX_NAMES = {
     bearish: "Caja de las 02:00 · rango bajista",
     bullish: "Caja de las 02:00 · rango alcista",
     candle: "Caja de las 02:00 · vela"
   };
 
-  function boxesShown() { return state.chart === BOX_CHART && !blindfolded(); }
+  function boxesShown() { return BOX_CHARTS.indexOf(state.chart) >= 0 && !blindfolded(); }
 
   /* La caja actual: la última que se sabe al cierre de la última vela del
    * tramo, si cae en él. Las cajas llegan en orden. */
@@ -331,7 +333,7 @@
     if (!boxesShown() || cut.end <= cut.start) { return []; }
     var step = span(BOX_CHART);
     var lo = b.t[cut.start];
-    var edge = b.t[cut.end - 1] + step;   // cierre de la última vela a la vista
+    var edge = b.t[cut.end - 1] + span(state.chart);   // cierre de la última vela a la vista
     var known = (sym().boxes || []).filter(function (box) { return box.known + step <= edge; });
     var box = known[known.length - 1];
     if (!box) { return []; }
@@ -383,20 +385,111 @@
   /* Qué se ve de la capa calculada y qué no. Se dice siempre: un H3 sin cajas
    * a la vista no es lo mismo que un Diario donde no se dibujan. */
   function boxCaption(cut) {
-    if (state.chart !== BOX_CHART) {
-      return "caja de las 02:00 (calculada): sólo se dibuja en H3";
+    if (BOX_CHARTS.indexOf(state.chart) < 0) {
+      return "caja de las 02:00 (calculada): sólo se dibuja en H3 y en H1";
     }
     if (blindfolded()) {
       return "caja de las 02:00 (calculada): oculta hasta Revelar";
     }
     var current = visibleBoxes(cut)[0];
-    return "caja de las 02:00 NY en H3 (calculada por el motor): el rango vivo antes de " +
+    return "caja de las 02:00 NY de H3 (calculada por el motor): el rango vivo antes de " +
       "las 02:00, o la vela anterior si no hay; la sustituye la de las 02:00 si cierra " +
       "fuera, o la vela que toque su segundo extremo; vale hasta las 12:00 NY; sólo la " +
       "actual, las anteriores no se dibujan · " +
       (current
         ? "actual: de " + price(current.box.low) + " a " + price(current.box.high)
         : "ninguna a la vista");
+  }
+
+  // --- Señal de confirmación en H1 (capa calculada) -----------------------------
+
+  /* Llegan RESUELTAS del motor: una como mucho por vela de H3, cuando H1 ha
+   * tocado un extremo de la caja y una vela de H1 le hace turtle soup a la
+   * inmediatamente anterior. Aquí sólo se pintan, y sólo en H1.
+   *
+   * De cada una, las dos líneas de la vela anterior —la del turtle soup, el
+   * extremo barrido, continua; la del otro extremo, a trazos— desde esa vela
+   * hasta que cierra la vela de H3, y un triángulo en la vela de la señal. Se
+   * ven todas las del tramo, cada una desde que cierra su vela; en replay, sin
+   * pasar del reloj. */
+  var SIGNAL_CHART = "H1";
+  var SIGNAL_NAMES = {
+    swept: "Señal H1 · línea del turtle soup",
+    opposite: "Señal H1 · otro extremo",
+    mark: "Señal H1 · confirmación"
+  };
+
+  function signalsShown() { return state.chart === SIGNAL_CHART && !blindfolded(); }
+
+  function visibleSignals(cut) {
+    var b = bars();
+    if (!signalsShown() || cut.end <= cut.start) { return []; }
+    var step = span(SIGNAL_CHART);
+    var lo = b.t[cut.start];
+    var edge = b.t[cut.end - 1] + step;
+    return (sym().signals || []).filter(function (signal) {
+      return signal.t + step <= edge && signal.t >= lo;
+    }).map(function (signal) {
+      return { signal: signal, from: Math.max(signal.from, lo), to: Math.min(signal.until, edge) };
+    });
+  }
+
+  function signalCaption_(signal) {
+    var bullish = signal.dir === "bullish";
+    return "Señal de confirmación H1 (calculada)<br>turtle soup " +
+      (bullish ? "alcista" : "bajista") + " en " + stamp(signal.t) +
+      "<br>tras tocar el " + (bullish ? "mínimo" : "máximo") + " de la caja de las 02:00" +
+      "<br>línea del turtle soup " + price(signal.swept) + " · otro extremo " +
+      price(signal.opposite) + "<br>anticipa que la vela de H3 cierra dentro; hasta " +
+      stamp(signal.until);
+  }
+
+  function signalTraces(cut) {
+    var shown = visibleSignals(cut);
+    if (!shown.length) { return []; }
+    var traces = ["swept", "opposite"].map(function (level) {
+      var x = [], y = [], text = [];
+      shown.forEach(function (item) {
+        var caption = signalCaption_(item.signal);
+        x.push(iso(item.from), iso(item.to), null);
+        y.push(item.signal[level], item.signal[level], null);
+        text.push(caption, caption, null);
+      });
+      return {
+        type: "scatter", mode: "lines", name: SIGNAL_NAMES[level], x: x, y: y,
+        line: { color: COLORS.signal, width: 1.4, dash: level === "swept" ? "solid" : "dash" },
+        text: text, hoverinfo: "text", hoverlabel: { align: "left" }
+      };
+    });
+    traces.push({
+      type: "scatter", mode: "markers", name: SIGNAL_NAMES.mark,
+      x: shown.map(function (item) { return iso(item.signal.t); }),
+      y: shown.map(function (item) { return item.signal.swept; }),
+      marker: {
+        color: COLORS.signal, size: 11,
+        symbol: shown.map(function (item) {
+          return item.signal.dir === "bullish" ? "triangle-up" : "triangle-down";
+        })
+      },
+      text: shown.map(function (item) { return signalCaption_(item.signal); }),
+      hoverinfo: "text", hoverlabel: { align: "left" }
+    });
+    return traces;
+  }
+
+  function signalCaption(cut) {
+    if (state.chart !== SIGNAL_CHART) {
+      return "señal de H1 (calculada): sólo se dibuja en H1";
+    }
+    if (blindfolded()) {
+      return "señal de H1 (calculada): oculta hasta Revelar";
+    }
+    var count = visibleSignals(cut).length;
+    return "señal de confirmación en H1 (calculada por el motor): con la vela de H3 " +
+      "abierta, H1 toca un extremo de la caja y una vela de H1 le hace turtle soup a la " +
+      "anterior en ese lado; línea continua en el extremo barrido, a trazos en el otro; " +
+      "una por vela de H3 · " +
+      (count ? count + " a la vista" : "ninguna a la vista");
   }
 
   /* La vela en formación. Se arma con las velas de la temporalidad inferior que
@@ -2219,7 +2312,7 @@
     var range = bounds();
     var cut = slice(range);
 
-    Plotly.react("chart", priceTraces(cut).concat(boxTraces(cut)), layout(range), {
+    Plotly.react("chart", priceTraces(cut).concat(boxTraces(cut), signalTraces(cut)), layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
       // Sin las herramientas de dibujo de Plotly: lo que se marca a mano son la
       // caja, los recuadros y las líneas de este explorador, que se numeran, se
@@ -2251,7 +2344,7 @@
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + sym().label + " · " +
         label(state.chart) + " · " + range.from + " → " + range.to + " · " +
         visible.toLocaleString("es-ES") + " velas. Marca lo que veas y pulsa Revelar. " +
-        boxCaption(cut) + ". " +
+        boxCaption(cut) + ". " + signalCaption(cut) + ". " +
         "Sorteada dentro de " + state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
@@ -2284,8 +2377,8 @@
     // Lo que este explorador NO dibuja. Con el gráfico pelado, la ausencia de
     // marcas se lee como que ahí no pasó nada, y lo que pasa es que todavía no
     // hay quien lo calcule: eso hay que decirlo, no dejarlo suponer.
-    text += " · SIN ESTRATEGIA: no hay señales ni entradas. " + boxCaption(cut) +
-      ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
+    text += " · SIN ESTRATEGIA: no hay entradas. " + boxCaption(cut) + ". " +
+      signalCaption(cut) + ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
     if (sym().skipped && sym().skipped.length) {
       text += " · temporalidades sin velas en " + sym().label + ": " +
         sym().skipped.join(" · ");

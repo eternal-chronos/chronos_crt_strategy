@@ -265,12 +265,12 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
     <span><i style="background:#1baf7a"></i>vela alcista
       <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
       por debajo de la apertura, sin ninguna otra lectura detrás</span>
-    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay señales ni entradas
-      calculadas. Lo único calculado es la caja de las 02:00 en H3; todo lo demás que se ve encima
+    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay entradas calculadas.
+      Lo único calculado es la caja de las 02:00 de H3 y la señal de H1; todo lo demás que se ve encima
       del precio lo pone tu mano, y el estado de abajo dice en cada dibujo qué es cada cosa.</spa    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
       <i class="box" style="background:#2a78d6; opacity:.3"></i>
       <i class="box" style="background:#eda100; opacity:.3"></i><b>Caja de las 02:00</b>
-      (calculada por el motor, borde continuo; sólo en H3). Un minuto antes de que abra la vela
+      (calculada por el motor, borde continuo; en H3 y en H1). Un minuto antes de que abra la vela
       de las 02:00 de Nueva York, si hay un rango CRT vivo en H3 la caja es ese rango (naranja
       el bajista, azul el alcista); si no, es la vela anterior aunque no sea un rango (ámbar).
       Si la vela de las 02:00 cierra fuera de la caja, por arriba o por abajo, al cerrar pasa a
@@ -280,9 +280,18 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       segundo (ámbar); cerrar fuera ya no la inhabilita. Vale hasta las 12:00 NY. <b>Sólo se
       dibuja la actual</b>: las de días anteriores y las sustituidas no se ven. En un reloj
       UTC-4 fijo la vela de las 02:00 NY sale a las 02:00 en verano y a las 03:00 en invierno:
-      es la misma. En el Diario, H12 y H6 no se dibuja nada calculado. En replay, cada caja
+      es la misma. En el Diario, H12, H6, H4 y M15 no se dibuja nada calculado. En replay, cada caja
       desde que cierra la vela que la hace existir; ocultas en la auditoría ciega hasta
       Revelar</span>
+    <span><i style="background:#6f4bd8"></i><b>Señal de confirmación H1</b> (calculada por el
+      motor, violeta; sólo en H1). Con una vela de H3 abierta, cuando H1 toca un extremo de la
+      caja de las 02:00 y una vela de H1 le saca ese mismo extremo a la vela inmediatamente
+      anterior y cierra de vuelta (turtle soup, forme rango o no; de dos o más velas atrás no
+      vale), se activa la señal: anticipa que la vela de H3 cerrará dentro de la caja. Da igual
+      que pase fuera de la caja. Triángulo en la vela de la señal, línea continua en el extremo
+      barrido de la vela anterior y a trazos en su otro extremo, hasta que cierra la vela de H3.
+      Una por vela de H3, que empieza de cero; sólo velas de H1 que cierran a las 12:00 NY o
+      antes. Ocultas en la auditoría ciega hasta Revelar</span>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra

@@ -142,7 +142,8 @@ function boxLayer(name) {
 }
 
 function signalLayer(name) {
-  return /^Señal H1 · (línea del turtle soup|otro extremo|confirmación)$/.test(name || '');
+  return /^Señal H1 · (línea del turtle soup|otro extremo|confirmación)$/.test(name || '') ||
+    /^Señal H4 · (línea del turtle soup|otro extremo|buscar entradas)$/.test(name || '');
 }
 
 function simShape(shape) {
@@ -392,6 +393,11 @@ steps.push(snapshot('todo'));
 if (payload.symbols[0].charts.indexOf('H1') >= 0) {
   selectChart('H1');
   steps.push(snapshot('h1-todo'));
+  tabs()[0].fire('click');
+}
+if (payload.symbols[0].charts.indexOf('H4') >= 0) {
+  selectChart('H4');
+  steps.push(snapshot('h4-todo'));
   tabs()[0].fire('click');
 }
 presets[presets.length - 1].fire('click');

@@ -7,12 +7,13 @@ y poder marcar encima.
 
 **No dibuja ninguna estrategia porque todavía no hay ninguna.** Lo que sale del
 payload son velas —cuatro pares, las temporalidades que la configuración pida—,
-los nombres con los que el propietario marca a mano y DOS capas calculadas: la
+los nombres con los que el propietario marca a mano y TRES capas calculadas: la
 caja de las 02:00 de Nueva York en H3 (`domain/crt/decision_box.py`), que se
-dibuja en H3 y en H1, y la señal de confirmación de H1
-(`domain/crt/confirmation.py`), sólo en H1. Se calculan aquí y el JavaScript
+dibuja en H3 y en H1, la señal de confirmación de H1
+(`domain/crt/confirmation.py`), sólo en H1, y su confirmación en H4
+(`domain/crt/h4_confirmation.py`), sólo en H4. Se calculan aquí y el JavaScript
 sólo las pinta; el explorador separa en leyenda y estado lo que sale del motor
-de lo que pone una mano. En el Diario, H12, H6, H4 y M15 no se dibuja nada
+de lo que pone una mano. En el Diario, H12, H6 y M15 no se dibuja nada
 calculado.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
@@ -35,12 +36,14 @@ import plotly.offline as pyo
 from chronos.application.chart.config import (
     H1,
     H3,
+    H4,
     TIMEFRAME_KEYS,
     TIMEFRAME_LABELS,
     MarksConfig,
 )
 from chronos.domain.crt.confirmation import confirmation_signals
 from chronos.domain.crt.decision_box import RANGE, decision_boxes
+from chronos.domain.crt.h4_confirmation import h4_confirmations
 from chronos.domain.crt.ranges import BULLISH as BULLISH_RANGE
 from chronos.infrastructure.clock import SystemClock
 from chronos.infrastructure.market.chart_run import ChartRun, SymbolBars
@@ -72,8 +75,9 @@ BOX_COLORS: dict[str, str] = {
     "candle": theme.SERIES[3],
 }
 
-#: La señal de confirmación de H1, la otra capa del motor: violeta, fuera de las
-#: velas, de la caja y de la mano.
+#: Las señales de confirmación de H1 y de H4, las otras capas del motor:
+#: violeta, fuera de las velas, de la caja y de la mano. Cada una se dibuja sólo
+#: en su temporalidad, así que no se cruzan.
 SIGNAL_COLOR = theme.VIOLET
 
 #: Minuto cero de la escala de tiempos del explorador.
@@ -192,6 +196,12 @@ def _symbol_payload(item: SymbolBars, max_bars: int) -> dict[str, Any]:
         "signals": (
             _signals_payload(frames[H1], frames[H3]) if H1 in frames and H3 in frames else []
         ),
+        #: Las de H1 que H4 confirma: la señal para buscar entradas.
+        "h4signals": (
+            _h4_signals_payload(frames[H1], frames[H3], frames[H4])
+            if H1 in frames and H3 in frames and H4 in frames
+            else []
+        ),
     }
 
 
@@ -253,6 +263,40 @@ def _signals_payload(h1: pd.DataFrame, h3: pd.DataFrame) -> list[dict[str, Any]]
                 signals["bar"].tolist(),
                 signals["swept"].tolist(),
                 signals["opposite"].tolist(),
+                strict=True,
+            )
+        )
+    ]
+
+
+def _h4_signals_payload(
+    h1: pd.DataFrame, h3: pd.DataFrame, h4: pd.DataFrame
+) -> list[dict[str, Any]]:
+    """Cada confirmación con la etiqueta de la H4 anterior (``from``), la de
+    la H4 en curso (``t``), su cierre (``until``) y la vela de H1 a cuyo cierre
+    se supo (``known``), en minutos desde la época."""
+    confirmations = h4_confirmations(h1, h3, h4)
+    h1_minutes = _epoch_minutes(pd.DatetimeIndex(h1.index))
+    h4_minutes = _epoch_minutes(pd.DatetimeIndex(h4.index))
+    opens = _epoch_minutes(pd.DatetimeIndex(confirmations["h4_open"]))
+    closes = _epoch_minutes(pd.DatetimeIndex(confirmations["h4_close"]))
+    return [
+        {
+            "dir": "bullish" if direction == BULLISH_RANGE else "bearish",
+            "from": h4_minutes[previous],
+            "t": opens[position],
+            "until": closes[position],
+            "known": h1_minutes[bar],
+            "swept": round(float(swept), _PAYLOAD_DECIMALS),
+            "opposite": round(float(opposite), _PAYLOAD_DECIMALS),
+        }
+        for position, (direction, bar, previous, swept, opposite) in enumerate(
+            zip(
+                confirmations["direction"].tolist(),
+                confirmations["bar"].tolist(),
+                confirmations["previous"].tolist(),
+                confirmations["swept"].tolist(),
+                confirmations["opposite"].tolist(),
                 strict=True,
             )
         )
@@ -327,7 +371,7 @@ def _subtitle(run: ChartRun) -> str:
     return (
         f"{pares} · lado {config.price_side} · día desde "
         f"{config.aggregation.describe_daily_start()} · sin estrategia: velas, la caja de "
-        f"las 02:00 en H3 y la señal de H1 calculadas y lo que marques a mano{faltan}"
+        f"las 02:00 en H3 y las señales de H1 y H4 calculadas y lo que marques a mano{faltan}"
     )
 
 

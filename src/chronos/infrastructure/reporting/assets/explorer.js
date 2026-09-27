@@ -2,9 +2,9 @@
  *
  * El chasis del gráfico: velas o cierres, cuatro temporalidades, cuatro pares,
  * ventana de fechas, zoom, replay y las herramientas con las que el propietario
- * marca a mano encima del precio. Encima, DOS capas calculadas: la caja de las
- * 02:00 NY de H3, que se ve en H3 y en H1, y la señal de confirmación de H1,
- * sólo en H1. Llegan resueltas del motor y aquí sólo se pintan, cada una con
+ * marca a mano encima del precio. Encima, TRES capas calculadas: la caja de las
+ * 02:00 NY de H3, que se ve en H3 y en H1, la señal de confirmación de H1, sólo
+ * en H1, y su confirmación en H4, sólo en H4. Llegan resueltas del motor y aquí sólo se pintan, cada una con
  * sus trazas, su entrada en la leyenda y su línea en el estado.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
@@ -252,8 +252,8 @@
 
   /* Con la venda puesta no se dibuja nada más que las velas: es el punto de la
    * prueba —mirar el gráfico pelado antes de ver lo que marcaste— y por eso el
-   * apagón se hace en un único sitio: alcanza a la caja de las 02:00 y a la señal
-   * de H1 calculadas, que no se ven hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
+   * apagón se hace en un único sitio: alcanza a la caja de las 02:00 y a las señales
+   * de H1 y H4 calculadas, que no se ven hasta Revelar. Las marcas a mano sí: marcar es la prueba. */
   function blindfolded() { return state.blind && !state.revealed; }
 
   function rgba(hex, alpha) {
@@ -401,68 +401,98 @@
         : "ninguna a la vista");
   }
 
-  // --- Señal de confirmación en H1 (capa calculada) -----------------------------
+  // --- Señales de confirmación en H1 y en H4 (capas calculadas) ---------------
 
-  /* Llegan RESUELTAS del motor: una como mucho por vela de H3, cuando H1 ha
-   * tocado un extremo de la caja y una vela de H1 le hace turtle soup a la
-   * inmediatamente anterior. Aquí sólo se pintan, y sólo en H1.
+  /* Llegan RESUELTAS del motor y aquí sólo se pintan, cada una en su gráfico:
+   *
+   * - H1: una como mucho por vela de H3, cuando H1 ha tocado un extremo de la
+   *   caja y una vela de H1 le hace turtle soup a la inmediatamente anterior.
+   * - H4: las de H1 que H4 confirma, la señal para buscar entradas: la vela de
+   *   H4 en curso le hace turtle soup a la inmediatamente anterior, del mismo
+   *   lado, mientras la de H1 sigue activa.
    *
    * De cada una, las dos líneas de la vela anterior —la del turtle soup, el
    * extremo barrido, continua; la del otro extremo, a trazos— desde esa vela
-   * hasta que cierra la vela de H3, y un triángulo en la vela de la señal. Se
-   * ven todas las del tramo, cada una desde que cierra su vela; en replay, sin
-   * pasar del reloj. */
-  var SIGNAL_CHART = "H1";
-  var SIGNAL_NAMES = {
-    swept: "Señal H1 · línea del turtle soup",
-    opposite: "Señal H1 · otro extremo",
-    mark: "Señal H1 · confirmación"
+   * hasta que cierra la de H3 (en H1) o la de H4 en curso (en H4), y un
+   * triángulo en la vela de la señal. Se ven todas las del tramo, cada una
+   * desde que cierra la vela de H1 que la hace existir; en replay, sin pasar
+   * del reloj. En H4 eso pasa con la vela de H4 todavía a medio hacer, así que
+   * su borde es el reloj del replay y no el cierre de la última H4. */
+  var SIGNAL_LAYERS = {
+    H1: {
+      key: "signals", title: "Señal de confirmación H1",
+      names: {
+        swept: "Señal H1 · línea del turtle soup",
+        opposite: "Señal H1 · otro extremo",
+        mark: "Señal H1 · confirmación"
+      },
+      known: function (signal) { return signal.t; },
+      detail: function (signal) {
+        return "tras tocar el " + (signal.dir === "bullish" ? "mínimo" : "máximo") +
+          " de la caja de las 02:00<br>anticipa que la vela de H3 cierra dentro; hasta " +
+          stamp(signal.until);
+      },
+      clock: false
+    },
+    H4: {
+      key: "h4signals", title: "Señal de confirmación H4 · buscar entradas",
+      names: {
+        swept: "Señal H4 · línea del turtle soup",
+        opposite: "Señal H4 · otro extremo",
+        mark: "Señal H4 · buscar entradas"
+      },
+      known: function (signal) { return signal.known; },
+      detail: function (signal) {
+        return "la vela de H4 en curso, sobre la anterior (" + stamp(signal.from) + ")" +
+          "<br>confirma la señal de H1 al cierre de la vela de H1 de " + stamp(signal.known);
+      },
+      clock: true
+    }
   };
 
-  function signalsShown() { return state.chart === SIGNAL_CHART && !blindfolded(); }
+  function signalLayer() { return blindfolded() ? null : SIGNAL_LAYERS[state.chart] || null; }
 
   function visibleSignals(cut) {
+    var layer = signalLayer();
     var b = bars();
-    if (!signalsShown() || cut.end <= cut.start) { return []; }
-    var step = span(SIGNAL_CHART);
+    if (!layer || cut.end <= cut.start) { return []; }
+    var hour = span("H1");
     var lo = b.t[cut.start];
-    var edge = b.t[cut.end - 1] + step;
-    return (sym().signals || []).filter(function (signal) {
-      return signal.t + step <= edge && signal.t >= lo;
+    var edge = layer.clock && state.replay ? state.at : b.t[cut.end - 1] + span(state.chart);
+    return (sym()[layer.key] || []).filter(function (signal) {
+      return layer.known(signal) + hour <= edge && signal.t >= lo;
     }).map(function (signal) {
       return { signal: signal, from: Math.max(signal.from, lo), to: Math.min(signal.until, edge) };
     });
   }
 
-  function signalCaption_(signal) {
-    var bullish = signal.dir === "bullish";
-    return "Señal de confirmación H1 (calculada)<br>turtle soup " +
-      (bullish ? "alcista" : "bajista") + " en " + stamp(signal.t) +
-      "<br>tras tocar el " + (bullish ? "mínimo" : "máximo") + " de la caja de las 02:00" +
+  function signalCaption_(layer, signal) {
+    return layer.title + " (calculada)<br>turtle soup " +
+      (signal.dir === "bullish" ? "alcista" : "bajista") + " en " + stamp(signal.t) +
       "<br>línea del turtle soup " + price(signal.swept) + " · otro extremo " +
-      price(signal.opposite) + "<br>anticipa que la vela de H3 cierra dentro; hasta " +
-      stamp(signal.until);
+      price(signal.opposite) + "<br>" + layer.detail(signal);
   }
 
   function signalTraces(cut) {
+    var layer = signalLayer();
     var shown = visibleSignals(cut);
     if (!shown.length) { return []; }
     var traces = ["swept", "opposite"].map(function (level) {
       var x = [], y = [], text = [];
       shown.forEach(function (item) {
-        var caption = signalCaption_(item.signal);
+        var caption = signalCaption_(layer, item.signal);
         x.push(iso(item.from), iso(item.to), null);
         y.push(item.signal[level], item.signal[level], null);
         text.push(caption, caption, null);
       });
       return {
-        type: "scatter", mode: "lines", name: SIGNAL_NAMES[level], x: x, y: y,
+        type: "scatter", mode: "lines", name: layer.names[level], x: x, y: y,
         line: { color: COLORS.signal, width: 1.4, dash: level === "swept" ? "solid" : "dash" },
         text: text, hoverinfo: "text", hoverlabel: { align: "left" }
       };
     });
     traces.push({
-      type: "scatter", mode: "markers", name: SIGNAL_NAMES.mark,
+      type: "scatter", mode: "markers", name: layer.names.mark,
       x: shown.map(function (item) { return iso(item.signal.t); }),
       y: shown.map(function (item) { return item.signal.swept; }),
       marker: {
@@ -471,24 +501,28 @@
           return item.signal.dir === "bullish" ? "triangle-up" : "triangle-down";
         })
       },
-      text: shown.map(function (item) { return signalCaption_(item.signal); }),
+      text: shown.map(function (item) { return signalCaption_(layer, item.signal); }),
       hoverinfo: "text", hoverlabel: { align: "left" }
     });
     return traces;
   }
 
   function signalCaption(cut) {
-    if (state.chart !== SIGNAL_CHART) {
-      return "señal de H1 (calculada): sólo se dibuja en H1";
+    if (!SIGNAL_LAYERS[state.chart]) {
+      return "señales (calculadas): la de H1 sólo se dibuja en H1 y la de H4 sólo en H4";
     }
     if (blindfolded()) {
-      return "señal de H1 (calculada): oculta hasta Revelar";
+      return "señal de " + state.chart + " (calculada): oculta hasta Revelar";
     }
     var count = visibleSignals(cut).length;
-    return "señal de confirmación en H1 (calculada por el motor): con la vela de H3 " +
-      "abierta, H1 toca un extremo de la caja y una vela de H1 le hace turtle soup a la " +
-      "anterior en ese lado; línea continua en el extremo barrido, a trazos en el otro; " +
-      "una por vela de H3 · " +
+    var text = state.chart === "H1"
+      ? "señal de confirmación en H1 (calculada por el motor): con la vela de H3 " +
+        "abierta, H1 toca un extremo de la caja y una vela de H1 le hace turtle soup a la " +
+        "anterior en ese lado; una por vela de H3"
+      : "señal de confirmación en H4 para buscar entradas (calculada por el motor): con la " +
+        "señal de H1 activa, la vela de H4 en curso le hace turtle soup a la anterior en el " +
+        "mismo lado";
+    return text + "; línea continua en el extremo barrido, a trazos en el otro · " +
       (count ? count + " a la vista" : "ninguna a la vista");
   }
 

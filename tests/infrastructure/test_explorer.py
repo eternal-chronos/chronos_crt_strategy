@@ -6,8 +6,8 @@ dibujar, así que lo que se comprueba aquí es doble:
   · que el CHASIS funciona —los cuatro pares, las temporalidades, la ventana, el
     replay, el zoom y las herramientas de mano—, y
   · que lo único calculado que dibuja es la caja de las 02:00, en H3 y en H1,
-    y la señal de confirmación, sólo en H1, sin adelantarse al reloj del
-    replay y separadas de lo de la mano.
+    la señal de confirmación de H1, sólo en H1, y su confirmación en H4, sólo
+    en H4, sin adelantarse al reloj del replay y separadas de lo de la mano.
     Cualquier otra traza que no sean velas es un error, y el test lo dice con
     nombre.
 
@@ -182,7 +182,7 @@ def test_la_duracion_de_la_vela_se_mide_sobre_las_velas(run: ChartRun) -> None:
 
 
 def test_las_capas_calculadas_del_payload_son_la_caja_y_la_senal(run: ChartRun) -> None:
-    """Velas, cajas de las 02:00 de H3 y señales de H1, y nada más.
+    """Velas, cajas de las 02:00 de H3 y señales de H1 y de H4, y nada más.
 
     Si un día aparece una clave que no sea de las de abajo, será porque alguien
     ha metido otra capa calculada y este test tiene que enterarse.
@@ -194,12 +194,21 @@ def test_las_capas_calculadas_del_payload_son_la_caja_y_la_senal(run: ChartRun) 
     for symbol in payload["symbols"]:
         assert set(symbol) == {
             "id", "label", "decimals", "side", "provenance",
-            "charts", "spans", "bars", "skipped", "boxes", "signals",
+            "charts", "spans", "bars", "skipped", "boxes", "signals", "h4signals",
         }
         if H3 not in symbol["charts"]:
             assert symbol["boxes"] == [], f"{symbol['id']}: sin H3 no hay cajas"
             assert symbol["signals"] == [], f"{symbol['id']}: sin H3 no hay señales"
+            assert symbol["h4signals"] == [], f"{symbol['id']}: sin H3 no hay señales de H4"
             continue
+        assert symbol["h4signals"], f"{symbol['id']}: la fixture debería dar alguna de H4"
+        de_h1 = {(s["t"], s["dir"]) for s in symbol["signals"]}
+        for senal in symbol["h4signals"]:
+            assert set(senal) == {"dir", "from", "t", "until", "known", "swept", "opposite"}
+            assert senal["from"] < senal["t"] <= senal["known"] < senal["until"]
+            assert (senal["swept"] < senal["opposite"]) == (senal["dir"] == "bullish")
+            # Toda confirmación de H4 lo es de una señal de H1 del mismo lado.
+            assert any(t <= senal["known"] and d == senal["dir"] for t, d in de_h1)
         assert symbol["signals"], f"{symbol['id']}: la fixture debería dar alguna señal"
         for senal in symbol["signals"]:
             assert set(senal) == {"dir", "from", "t", "until", "swept", "opposite"}
@@ -227,6 +236,8 @@ def test_las_cajas_se_calculan_con_todo_h3_aunque_se_recorte(run: ChartRun) -> N
     assert recortado == completo
     senales = build_payload(run)["symbols"][0]["signals"]
     assert build_payload(replace(run, config=corto))["symbols"][0]["signals"] == senales
+    de_h4 = build_payload(run)["symbols"][0]["h4signals"]
+    assert build_payload(replace(run, config=corto))["symbols"][0]["h4signals"] == de_h4
 
 
 def test_el_color_de_la_senal_no_es_de_velas_ni_de_cajas_ni_de_la_mano() -> None:
@@ -364,12 +375,17 @@ SENALES = {
     "Señal H1 · otro extremo",
     "Señal H1 · confirmación",
 }
+SENALES_H4 = {
+    "Señal H4 · línea del turtle soup",
+    "Señal H4 · otro extremo",
+    "Señal H4 · buscar entradas",
+}
 
 
-def test_lo_calculado_es_la_caja_en_h3_y_h1_y_la_senal_en_h1(drawn: dict) -> None:
+def test_lo_calculado_es_la_caja_en_h3_y_h1_y_cada_senal_en_la_suya(drawn: dict) -> None:
     """Comprobado en cada paso del recorrido: en H3 sólo cajas, en H1 cajas y
-    señales, y en el resto sólo velas."""
-    permitidas = {H3: CAJAS, H1: CAJAS | SENALES}
+    señales de H1, en H4 señales de H4, y en el resto sólo velas."""
+    permitidas = {H3: CAJAS, H1: CAJAS | SENALES, H4: SENALES_H4}
     for step in drawn["steps"]:
         calculadas = set(step["plot"]["calculated"])
         propias = permitidas.get(step["chart"], set())
@@ -422,15 +438,20 @@ def test_en_h3_y_h1_se_dibujan_las_cajas_que_se_saben(run: ChartRun, drawn: dict
 
 
 def _senales_esperadas(symbol: dict, step: dict) -> set[tuple[int, int, int, float, float]]:
-    """Las señales cuya vela ha cerrado y cae en el tramo, como (vela, desde,
-    hasta, extremo barrido, otro extremo), con las líneas recortadas al tramo."""
-    paso = symbol["spans"][H1]
+    """Las señales que se saben al borde del tramo y caen en él, como (vela,
+    desde, hasta, extremo barrido, otro extremo), con las líneas recortadas.
+    Las de H1 se saben al cierre de su vela; las de H4, al cierre de la vela de
+    H1 que las da, y en replay su borde es el reloj."""
+    en_h4 = step["chart"] == H4
+    hora = symbol["spans"][H1]
     inicio = _minuto(step["plot"]["firstBar"])
-    borde = _minuto(step["plot"]["lastBar"]) + paso
+    borde = _minuto(step["plot"]["lastBar"]) + symbol["spans"][step["chart"]]
+    if en_h4 and "REPLAY" in step["notes"]:
+        borde = _minuto(_reloj(step))
     return {
         (s["t"], max(s["from"], inicio), min(s["until"], borde), s["swept"], s["opposite"])
-        for s in symbol["signals"]
-        if s["t"] + paso <= borde and s["t"] >= inicio
+        for s in symbol["h4signals" if en_h4 else "signals"]
+        if (s["known"] if en_h4 else s["t"]) + hora <= borde and s["t"] >= inicio
     }
 
 
@@ -438,9 +459,10 @@ def _senales_dibujadas(step: dict) -> set[tuple[int, int, int, float, float]]:
     trazas = {traza["name"]: traza for traza in step["plot"]["signals"]}
     if not trazas:
         return set()
-    barrida = trazas["Señal H1 · línea del turtle soup"]
-    otra = trazas["Señal H1 · otro extremo"]
-    marcas = trazas["Señal H1 · confirmación"]
+    capa = "H4" if step["chart"] == H4 else "H1"
+    barrida = trazas[f"Señal {capa} · línea del turtle soup"]
+    otra = trazas[f"Señal {capa} · otro extremo"]
+    marcas = trazas[f"Señal {capa} · confirmación" if capa == "H1" else "Señal H4 · buscar entradas"]
     return {
         (
             _minuto(marcas["x"][n]),
@@ -467,6 +489,33 @@ def test_en_h1_se_dibujan_las_senales_que_se_saben(run: ChartRun, drawn: dict) -
     assert len(_senales_dibujadas(todo)) == len(simbolos[todo["symbol"]]["signals"])
 
 
+def test_en_h4_se_dibujan_las_senales_que_se_saben(run: ChartRun, drawn: dict) -> None:
+    simbolos = {symbol["id"]: symbol for symbol in build_payload(run)["symbols"]}
+    vistas = 0
+    for step in drawn["steps"]:
+        if step["chart"] != H4 or "oculta hasta Revelar" in step["notes"]:
+            continue
+        esperadas = _senales_esperadas(simbolos[step["symbol"]], step)
+        assert _senales_dibujadas(step) == esperadas, f"«{step['label']}»"
+        vistas += len(esperadas)
+    assert vistas, "algún paso del recorrido debería enseñar señales en H4"
+    todo = _step(drawn, "h4-todo")
+    assert len(_senales_dibujadas(todo)) == len(simbolos[todo["symbol"]]["h4signals"])
+
+
+def test_las_senales_de_h4_van_en_violeta_y_dicen_que_son_para_buscar_entradas(
+    drawn: dict,
+) -> None:
+    trazas = {traza["name"]: traza for traza in _step(drawn, "h4-todo")["plot"]["signals"]}
+    assert set(trazas) == SENALES_H4
+    for traza in trazas.values():
+        assert traza["color"] == SIGNAL_COLOR
+        for texto in traza["captions"]:
+            assert texto.startswith("Señal de confirmación H4 · buscar entradas (calculada)")
+    assert trazas["Señal H4 · línea del turtle soup"]["dash"] == "solid"
+    assert trazas["Señal H4 · otro extremo"]["dash"] == "dash"
+
+
 def test_las_senales_van_en_violeta_con_su_trazo_y_su_triangulo(drawn: dict) -> None:
     trazas = {traza["name"]: traza for traza in _step(drawn, "h1-todo")["plot"]["signals"]}
     assert set(trazas) == SENALES
@@ -485,6 +534,11 @@ def test_el_replay_no_ensena_senales_mas_alla_del_reloj(drawn: dict) -> None:
     assert step["chart"] == H1
     for traza in step["plot"]["signals"] + step["plot"]["boxes"]:
         assert traza["maxX"][:16] <= _reloj(step)
+    for label in ("replay-inicio", "replay-paso", "replay-en-h4"):
+        step = _step(drawn, label)
+        assert step["chart"] == H4
+        for traza in step["plot"]["signals"]:
+            assert traza["maxX"][:16] <= _reloj(step)
 
 
 def test_las_cajas_van_rellenas_con_su_color_y_su_origen(drawn: dict) -> None:
@@ -528,7 +582,10 @@ def test_el_estado_dice_que_cajas_se_ven(drawn: dict) -> None:
     assert "caja de las 02:00 NY de H3 (calculada por el motor)" in _step(drawn, "grafico-H1")["notes"]
     assert "sólo se dibuja en H3 y en H1" in _step(drawn, "todo")["notes"]
     assert "señal de confirmación en H1 (calculada por el motor)" in _step(drawn, "grafico-H1")["notes"]
-    assert "señal de H1 (calculada): sólo se dibuja en H1" in _step(drawn, "grafico-H3")["notes"]
+    assert "la de H1 sólo se dibuja en H1 y la de H4 sólo en H4" in _step(drawn, "grafico-H3")["notes"]
+    assert "señal de confirmación en H4 para buscar entradas (calculada por el motor)" in (
+        _step(drawn, "grafico-H4")["notes"]
+    )
 
 
 def test_lo_unico_que_hay_en_shapes_lo_ha_puesto_una_mano(drawn: dict) -> None:

@@ -15,11 +15,12 @@ estrategia corre sin cambios en backtest, paper y live**.
 **La estrategia está empezando.** Sobre el chasis —el histórico de cuatro
 pares (XAUUSD, EURUSD, GBPUSD y USDJPY), el explorador para mirarlos y marcar
 encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
-tres piezas calculadas: los rangos CRT con su ciclo de vida
+cuatro piezas calculadas: los rangos CRT con su ciclo de vida
 (`domain/crt/ranges.py`), encima de ellos la **caja de las 02:00 NY en H3**
-(`domain/crt/decision_box.py`), que el explorador dibuja en H3 y en H1, y la
-**señal de confirmación en H1** (`domain/crt/confirmation.py`), sólo en H1. En
-D, 12H, 6H, 4H y 15M no se dibuja nada calculado.
+(`domain/crt/decision_box.py`), que el explorador dibuja en H3 y en H1, la
+**señal de confirmación en H1** (`domain/crt/confirmation.py`), sólo en H1, y
+su **confirmación en H4** (`domain/crt/h4_confirmation.py`), sólo en H4, que es
+la señal para buscar entradas. En D, 12H, 6H y 15M no se dibuja nada calculado.
 
 Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
 hay un rango CRT vivo en H3 la caja es su vela 1; si no, la vela anterior aunque
@@ -39,6 +40,14 @@ anticipa que la vela de H3 cerrará dentro de la caja. Da igual que ocurra fuera
 de la caja. Se marcan el extremo barrido y el otro extremo de la vela anterior.
 Cada vela de H3 empieza de cero, cuenta la primera señal de cada una, y sólo
 las velas de H1 que cierran a las 12:00 NY o antes.
+
+Confirmación en H4 (la señal para buscar entradas; las entradas, sin
+programar): con la señal de H1 activa —desde el cierre de su vela hasta que
+cierra su vela de H3, nunca después de las 12:00 NY—, la vela de H4 **en curso**
+le hace turtle soup a la vela de H4 **inmediatamente anterior** del mismo lado
+que H1: le ha sacado ese extremo y el último cierre de H1 está de vuelta. Vale
+el primer cierre de H1 en que se cumpla. Si la H4 en curso le ha sacado los dos
+extremos a la anterior, no confirma.
 
 El resto del flujo está en la sección siguiente, por programar.
 

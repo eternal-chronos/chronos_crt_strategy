@@ -38,6 +38,12 @@ MAGENTA = "#c0359a"
 CYAN = "#0b8fa8"
 OLIVE = "#7c8b12"
 
+# Las entradas que calcula el motor: el tramo del take y el del stop. Oscuros a
+# propósito, para no confundirse con el verde y el rojo de las velas, que son
+# los de la entrada simulada a mano.
+ENTRY_TAKE = "#136f63"
+ENTRY_STOP = "#8f2323"
+
 # Polaridad (ganancia / pérdida): pareja divergente azul ↔ rojo con gris neutro.
 POSITIVE = "#2a78d6"
 NEGATIVE = "#d03b3b"

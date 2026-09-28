@@ -5,15 +5,15 @@ doble clic y funciona sin conexión. Está pensado para una cosa concreta: poner
 el gráfico del proyecto al lado de las capturas de la plataforma del propietario
 y poder marcar encima.
 
-**No dibuja ninguna estrategia porque todavía no hay ninguna.** Lo que sale del
-payload son velas —cuatro pares, las temporalidades que la configuración pida—,
-los nombres con los que el propietario marca a mano y TRES capas calculadas: la
-caja de las 02:00 de Nueva York en H3 (`domain/crt/decision_box.py`), que se
-dibuja en H3 y en H1, la señal de confirmación de H1
-(`domain/crt/confirmation.py`), sólo en H1, y su confirmación en H4
-(`domain/crt/h4_confirmation.py`), sólo en H4. Se calculan aquí y el JavaScript
-sólo las pinta; el explorador separa en leyenda y estado lo que sale del motor
-de lo que pone una mano. En el Diario, H12, H6 y M15 no se dibuja nada
+Lo que sale del payload son velas —las temporalidades que la configuración
+pida—, los nombres con los que el propietario marca a mano y CUATRO capas
+calculadas: la caja de las 02:00 de Nueva York en H3
+(`domain/crt/decision_box.py`), que se dibuja en H3 y en H1, la señal de
+confirmación de H1 (`domain/crt/confirmation.py`), sólo en H1, su confirmación
+en H4 (`domain/crt/h4_confirmation.py`), sólo en H4, y las entradas
+(`domain/crt/entries.py`), en H4, H3, H1 y M15. Se calculan aquí y el
+JavaScript sólo las pinta; el explorador separa en leyenda y estado lo que sale
+del motor de lo que pone una mano. En el Diario, H12 y H6 no se dibuja nada
 calculado.
 
 Del payload sale todo lo que se puede derivar en el navegador: las etiquetas de
@@ -37,12 +37,14 @@ from chronos.application.chart.config import (
     H1,
     H3,
     H4,
+    M15,
     TIMEFRAME_KEYS,
     TIMEFRAME_LABELS,
     MarksConfig,
 )
 from chronos.domain.crt.confirmation import confirmation_signals
 from chronos.domain.crt.decision_box import RANGE, decision_boxes
+from chronos.domain.crt.entries import entries
 from chronos.domain.crt.h4_confirmation import h4_confirmations
 from chronos.domain.crt.ranges import BULLISH as BULLISH_RANGE
 from chronos.infrastructure.clock import SystemClock
@@ -79,6 +81,11 @@ BOX_COLORS: dict[str, str] = {
 #: violeta, fuera de las velas, de la caja y de la mano. Cada una se dibuja sólo
 #: en su temporalidad, así que no se cruzan.
 SIGNAL_COLOR = theme.VIOLET
+
+#: Las entradas, la última capa del motor: el tramo del take y el del stop, con
+#: tonos propios —ni el verde y el rojo de las velas, que son los de la entrada
+#: simulada a mano, ni los de la caja, la señal o la mano—.
+ENTRY_COLORS: dict[str, str] = {"take": theme.ENTRY_TAKE, "stop": theme.ENTRY_STOP}
 
 #: Minuto cero de la escala de tiempos del explorador.
 _EPOCH = pd.Timestamp("1970-01-01", tz="UTC")
@@ -141,6 +148,7 @@ def build_payload(
             "lines": hand_colors(config.marks.lines),
             "boxes": dict(BOX_COLORS),
             "signal": SIGNAL_COLOR,
+            "entries": dict(ENTRY_COLORS),
         },
         "labels": dict(TIMEFRAME_LABELS),
         "keys": {
@@ -200,6 +208,12 @@ def _symbol_payload(item: SymbolBars, max_bars: int) -> dict[str, Any]:
         "h4signals": (
             _h4_signals_payload(frames[H1], frames[H3], frames[H4])
             if H1 in frames and H3 in frames and H4 in frames
+            else []
+        ),
+        #: Las entradas en 15M, con su salida.
+        "entries": (
+            _entries_payload(frames[H1], frames[H3], frames[H4], frames[M15])
+            if all(timeframe in frames for timeframe in (H1, H3, H4, M15))
             else []
         ),
     }
@@ -303,6 +317,43 @@ def _h4_signals_payload(
     ]
 
 
+def _entries_payload(
+    h1: pd.DataFrame, h3: pd.DataFrame, h4: pd.DataFrame, m15: pd.DataFrame
+) -> list[dict[str, Any]]:
+    """Cada operación con el minuto en que entra (``at``, el cierre de su vela de
+    15M) y en el que sale (``exitAt``, el cierre de la vela que la saca; ``None``
+    si sigue abierta), en minutos desde la época, y ``r``, su resultado en
+    múltiplos de riesgo."""
+    trades = entries(h1, h3, h4, m15)
+    closes = _epoch_minutes(pd.DatetimeIndex(m15.index))
+    step = _span_minutes(m15)
+    return [
+        {
+            "dir": "bullish" if direction == BULLISH_RANGE else "bearish",
+            "at": closes[bar] + step,
+            "entry": round(float(entry), _PAYLOAD_DECIMALS),
+            "stop": round(float(stop), _PAYLOAD_DECIMALS),
+            "take": round(float(take), _PAYLOAD_DECIMALS),
+            "exitAt": closes[exit_bar] + step if exit_bar >= 0 else None,
+            "exit": round(float(exit_price), _PAYLOAD_DECIMALS) if exit_bar >= 0 else None,
+            "reason": reason or None,
+            "r": round(float(r), _PAYLOAD_DECIMALS) if exit_bar >= 0 else None,
+        }
+        for direction, bar, entry, stop, take, exit_bar, exit_price, reason, r in zip(
+            trades["direction"].tolist(),
+            trades["bar"].tolist(),
+            trades["entry"].tolist(),
+            trades["stop"].tolist(),
+            trades["take"].tolist(),
+            trades["exit_bar"].tolist(),
+            trades["exit"].tolist(),
+            trades["exit_reason"].tolist(),
+            trades["r"].tolist(),
+            strict=True,
+        )
+    ]
+
+
 # --- Velas ------------------------------------------------------------------
 
 
@@ -370,8 +421,8 @@ def _subtitle(run: ChartRun) -> str:
     faltan = f" · sin embeber: {', '.join(run.unavailable)}" if run.unavailable else ""
     return (
         f"{pares} · lado {config.price_side} · día desde "
-        f"{config.aggregation.describe_daily_start()} · sin estrategia: velas, la caja de "
-        f"las 02:00 en H3 y las señales de H1 y H4 calculadas y lo que marques a mano{faltan}"
+        f"{config.aggregation.describe_daily_start()} · velas, la caja de las 02:00 en H3, "
+        f"las señales de H1 y H4 y las entradas calculadas, y lo que marques a mano{faltan}"
     )
 
 

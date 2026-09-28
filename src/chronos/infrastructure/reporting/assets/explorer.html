@@ -155,6 +155,9 @@ inferior que ya han cerrado. Va HUECA: todavía no ha cerrado.">
           <input type="number" id="replay-window" value="180" min="20" max="2000" step="20"
             style="width:88px" aria-label="Velas a la vista durante el replay">
         </label>
+        <strong id="strategy-capital" style="font-size:13px; font-variant-numeric:tabular-nums;"
+          title="Capital de la estrategia: 50 $ al empezar el replay, 10 % de riesgo del
+capital de cada momento en cada entrada calculada."></strong>
       </div>
     </div>
 
@@ -265,9 +268,10 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
     <span><i style="background:#1baf7a"></i>vela alcista
       <i style="background:#d03b3b; margin-left:10px"></i>vela bajista: el cierre por encima o
       por debajo de la apertura, sin ninguna otra lectura detrás</span>
-    <span><b>ESTE EXPLORADOR NO DIBUJA NINGUNA ESTRATEGIA.</b> No hay entradas calculadas.
-      Lo único calculado es la caja de las 02:00 de H3 y las señales de H1 y H4; todo lo demás que se ve encima
-      del precio lo pone tu mano, y el estado de abajo dice en cada dibujo qué es cada cosa.</spa    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
+    <span>Lo calculado por el motor es la caja de las 02:00 de H3, las señales de H1 y H4 y
+      las entradas; todo lo demás que se ve encima del precio lo pone tu mano, y el estado de
+      abajo dice en cada dibujo qué es cada cosa.</span>
+    <span><i class="box" style="background:#eb6834; opacity:.3"></i>
       <i class="box" style="background:#2a78d6; opacity:.3"></i>
       <i class="box" style="background:#eda100; opacity:.3"></i><b>Caja de las 02:00</b>
       (calculada por el motor, borde continuo; en H3 y en H1). Un minuto antes de que abra la vela
@@ -302,8 +306,23 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       barrió H1 y el último cierre de H1 está de vuelta del otro lado (turtle soup; de dos o
       más velas atrás no vale, y si le ha sacado los dos extremos no cuenta). Triángulo en la
       vela de H4 en curso, línea continua en el extremo barrido de la anterior y a trazos en su
-      otro extremo. No hay entradas: sólo se activa la señal. En replay aparece al cierre de la
+      otro extremo. Es la señal para entrar (ver Entradas). En replay aparece al cierre de la
       vela de H1 que la da, con la H4 todavía a medio hacer</span>
+    <span><i class="box" style="background:#136f63; opacity:.3"></i>
+      <i class="box" style="background:#8f2323; opacity:.3"></i><b>Entradas</b> (calculadas
+      por el motor; en H4, H3, H1 y M15). Con H3, H1 y H4 cumplidos se espera a que cierre la
+      vela de 15M en curso y se entra a su cierre, en el sentido de la señal. Stop en el extremo
+      del turtle soup (lo más lejos que llegó el precio desde la vela de H1 de la señal hasta la
+      entrada), take en el objetivo del rango de H3 (el lado contrario de la caja): tramo del
+      take verde oscuro, tramo del stop granate, desde la entrada hasta la salida, y una ✕ en
+      la salida. Si una vela de 15M toca el stop y el take, cuenta el stop; si a las 16:30 NY no
+      ha tocado ninguno, se cierra al precio de esa hora. Sólo entradas cuya vela de 15M cierra a
+      las 12:00 NY o antes, y como mucho 2 al día. En replay, cada una desde que entra y sin
+      enseñar la salida hasta que llega el reloj</span>
+    <span><b>Capital de la estrategia</b> (en el replay): arranca en 50 $ al pulsar Empezar
+      y cuenta las entradas desde ese momento. Cada una arriesga el 10 % del capital que hay
+      cuando entra; ganar suma ese riesgo por el R:R que hizo, perder lo resta entero, y lo que
+      queda es el capital de la siguiente. Retroceder el replay lo deshace</span>
     <span>el selector de <b>Par</b> cambia de histórico sin abrir otro fichero: los cuatro
       viajan embebidos. Cada uno con sus decimales, y con lo que hayas marcado a mano en él;
       el encuadre manual se suelta al cambiar porque el rango de precios de uno no encuadra

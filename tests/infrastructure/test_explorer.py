@@ -1,13 +1,14 @@
 """El explorador de velas: lo que se dibuja y lo que se marca a mano.
 
-Es la única herramienta visual del proyecto y todavía no hay estrategia que
-dibujar, así que lo que se comprueba aquí es doble:
+Es la única herramienta visual del proyecto, así que lo que se comprueba aquí
+es doble:
 
   · que el CHASIS funciona —los cuatro pares, las temporalidades, la ventana, el
     replay, el zoom y las herramientas de mano—, y
   · que lo único calculado que dibuja es la caja de las 02:00, en H3 y en H1,
-    la señal de confirmación de H1, sólo en H1, y su confirmación en H4, sólo
-    en H4, sin adelantarse al reloj del replay y separadas de lo de la mano.
+    la señal de confirmación de H1, sólo en H1, su confirmación en H4, sólo en
+    H4, y las entradas, en H4, H3, H1 y M15, sin adelantarse al reloj del
+    replay y separadas de lo de la mano.
     Cualquier otra traza que no sean velas es un error, y el test lo dice con
     nombre.
 
@@ -51,6 +52,7 @@ from chronos.infrastructure.reporting.explorer import (
     BEARISH,
     BOX_COLORS,
     BULLISH,
+    ENTRY_COLORS,
     HAND_COLORS,
     SIGNAL_COLOR,
     bar_counts,
@@ -194,7 +196,7 @@ def test_las_capas_calculadas_del_payload_son_la_caja_y_la_senal(run: ChartRun) 
     for symbol in payload["symbols"]:
         assert set(symbol) == {
             "id", "label", "decimals", "side", "provenance",
-            "charts", "spans", "bars", "skipped", "boxes", "signals", "h4signals",
+            "charts", "spans", "bars", "skipped", "boxes", "signals", "h4signals", "entries",
         }
         if H3 not in symbol["charts"]:
             assert symbol["boxes"] == [], f"{symbol['id']}: sin H3 no hay cajas"
@@ -202,6 +204,32 @@ def test_las_capas_calculadas_del_payload_son_la_caja_y_la_senal(run: ChartRun) 
             assert symbol["h4signals"] == [], f"{symbol['id']}: sin H3 no hay señales de H4"
             continue
         assert symbol["h4signals"], f"{symbol['id']}: la fixture debería dar alguna de H4"
+        assert any(e["exitAt"] is not None for e in symbol["entries"]), (
+            f"{symbol['id']}: la fixture debería dar alguna entrada cerrada"
+        )
+        de_h4 = {(s["known"], s["dir"]) for s in symbol["h4signals"]}
+        for entrada in symbol["entries"]:
+            assert set(entrada) == {
+                "dir", "at", "entry", "stop", "take", "exitAt", "exit", "reason", "r"
+            }
+            vende = entrada["dir"] == "bearish"
+            assert (entrada["take"] < entrada["entry"] < entrada["stop"]) == vende
+            assert (entrada["stop"] < entrada["entry"] < entrada["take"]) != vende
+            # Cada entrada, al cierre de la vela de 15M que abre al confirmar H4.
+            quince = symbol["spans"][M15]
+            assert any(
+                known + symbol["spans"][H1] + quince == entrada["at"] and d == entrada["dir"]
+                for known, d in de_h4
+            )
+            if entrada["exitAt"] is None:
+                assert entrada["exit"] is None and entrada["r"] is None
+                continue
+            assert entrada["at"] < entrada["exitAt"]
+            assert entrada["reason"] in {"stop", "take", "cierre_16:30"}
+            if entrada["reason"] == "stop":
+                assert (entrada["exit"], entrada["r"]) == (entrada["stop"], -1.0)
+            if entrada["reason"] == "take":
+                assert entrada["exit"] == entrada["take"] and entrada["r"] > 0
         de_h1 = {(s["t"], s["dir"]) for s in symbol["signals"]}
         for senal in symbol["h4signals"]:
             assert set(senal) == {"dir", "from", "t", "until", "known", "swept", "opposite"}
@@ -238,6 +266,8 @@ def test_las_cajas_se_calculan_con_todo_h3_aunque_se_recorte(run: ChartRun) -> N
     assert build_payload(replace(run, config=corto))["symbols"][0]["signals"] == senales
     de_h4 = build_payload(run)["symbols"][0]["h4signals"]
     assert build_payload(replace(run, config=corto))["symbols"][0]["h4signals"] == de_h4
+    entradas = build_payload(run)["symbols"][0]["entries"]
+    assert build_payload(replace(run, config=corto))["symbols"][0]["entries"] == entradas
 
 
 def test_el_color_de_la_senal_no_es_de_velas_ni_de_cajas_ni_de_la_mano() -> None:
@@ -308,9 +338,9 @@ def test_el_html_es_autocontenido(run: ChartRun) -> None:
     assert "src=" not in html.split('<script id="explorer-data"')[0]
 
 
-def test_el_html_dice_en_la_cabecera_que_no_hay_estrategia(run: ChartRun) -> None:
+def test_el_html_dice_en_la_cabecera_que_hay_entradas_calculadas(run: ChartRun) -> None:
     html = render_explorer(run)
-    assert "sin estrategia" in html
+    assert "las entradas calculadas" in html
     assert "XAUUSD (oro) · EURUSD" in html
 
 
@@ -382,10 +412,19 @@ SENALES_H4 = {
 }
 
 
+ENTRADAS = {"Entrada · tramo del take", "Entrada · tramo del stop", "Entrada · salida"}
+
+
 def test_lo_calculado_es_la_caja_en_h3_y_h1_y_cada_senal_en_la_suya(drawn: dict) -> None:
-    """Comprobado en cada paso del recorrido: en H3 sólo cajas, en H1 cajas y
-    señales de H1, en H4 señales de H4, y en el resto sólo velas."""
-    permitidas = {H3: CAJAS, H1: CAJAS | SENALES, H4: SENALES_H4}
+    """Comprobado en cada paso del recorrido: en H3 cajas, en H1 cajas y
+    señales de H1, en H4 señales de H4, en esas tres y en M15 las entradas, y
+    en el resto sólo velas."""
+    permitidas = {
+        H3: CAJAS | ENTRADAS,
+        H1: CAJAS | SENALES | ENTRADAS,
+        H4: SENALES_H4 | ENTRADAS,
+        M15: ENTRADAS,
+    }
     for step in drawn["steps"]:
         calculadas = set(step["plot"]["calculated"])
         propias = permitidas.get(step["chart"], set())
@@ -596,11 +635,143 @@ def test_lo_unico_que_hay_en_shapes_lo_ha_puesto_una_mano(drawn: dict) -> None:
         )
 
 
-def test_el_estado_dice_que_no_hay_estrategia(drawn: dict) -> None:
+def test_el_estado_dice_que_entradas_se_ven_y_el_capital(drawn: dict) -> None:
     """Un gráfico pelado sin decirlo se lee como que ahí no pasó nada."""
     notas = _step(drawn, "todo")["notes"]
-    assert "SIN ESTRATEGIA" in notas
+    assert "entradas (calculadas): sólo se dibujan en H4, H3, H1 y M15" in notas
     assert "lo pone tu mano" in notas
+    for grafico in (H4, H3, H1, M15):
+        assert "ENTRADAS (calculadas por el motor)" in _step(drawn, f"grafico-{grafico}")["notes"]
+    assert "CAPITAL DE LA ESTRATEGIA: Capital 50,00 $ · arranca con el replay" in notas
+
+
+# --- Entradas y capital de la estrategia --------------------------------------
+
+
+def _entradas_esperadas(symbol: dict, step: dict) -> set[tuple[int, int, float, float, float]]:
+    """Las operaciones que se saben al borde del tramo y caen en él, como (desde,
+    hasta, entrada, take, stop). Fuera del replay el borde es el cierre de la
+    última vela a la vista; en replay, el reloj. La que no ha salido al borde
+    se estira hasta él."""
+    inicio = _minuto(step["plot"]["firstBar"])
+    borde = _minuto(step["plot"]["lastBar"]) + symbol["spans"][step["chart"]]
+    if "REPLAY" in step["notes"]:
+        borde = _minuto(_reloj(step))
+    esperadas = set()
+    for e in symbol["entries"]:
+        cerrada = e["exitAt"] is not None and e["exitAt"] <= borde
+        hasta = e["exitAt"] if cerrada else borde
+        if e["at"] <= borde and hasta >= inicio:
+            esperadas.add((max(e["at"], inicio), hasta, e["entry"], e["take"], e["stop"]))
+    return esperadas
+
+
+def _entradas_dibujadas(step: dict) -> set[tuple[int, int, float, float, float]]:
+    trazas = {traza["name"]: traza for traza in step["plot"]["entries"]}
+    if not trazas:
+        return set()
+    take, stop = trazas["Entrada · tramo del take"], trazas["Entrada · tramo del stop"]
+    return {
+        (
+            _minuto(take["x"][n]),
+            _minuto(take["x"][n + 1]),
+            take["y"][n + 2],
+            take["y"][n],
+            stop["y"][n],
+        )
+        for n in range(0, len(take["x"]), 6)
+    }
+
+
+def test_las_entradas_se_dibujan_desde_que_entran_hasta_que_salen(
+    run: ChartRun, drawn: dict
+) -> None:
+    simbolos = {symbol["id"]: symbol for symbol in build_payload(run)["symbols"]}
+    vistas = 0
+    for step in drawn["steps"]:
+        if step["chart"] not in {H4, H3, H1, M15} or "ocultas hasta Revelar" in step["notes"]:
+            continue
+        esperadas = _entradas_esperadas(simbolos[step["symbol"]], step)
+        assert _entradas_dibujadas(step) == esperadas, f"«{step['label']}»"
+        vistas += len(esperadas)
+    assert vistas, "algún paso del recorrido debería enseñar entradas"
+    assert _entradas_dibujadas(_step(drawn, "capital-en-m15")), "en M15 se debería ver la entrada"
+
+
+def test_las_entradas_van_con_sus_colores_y_dicen_lo_que_son(drawn: dict) -> None:
+    trazas = [t for step in drawn["steps"] for t in step["plot"]["entries"]]
+    assert {t["name"] for t in trazas} == ENTRADAS
+    for traza in trazas:
+        if traza["name"] == "Entrada · salida":
+            assert set(traza["color"]) <= set(ENTRY_COLORS.values())
+        else:
+            nivel = "take" if traza["name"].endswith("take") else "stop"
+            assert (traza["color"], traza["fill"]) == (ENTRY_COLORS[nivel], "toself")
+        for texto in traza["captions"]:
+            assert texto.startswith("Entrada (calculada) · ")
+            assert "extremo del turtle soup" in texto and "objetivo del rango de H3" in texto
+    assert set(ENTRY_COLORS.values()).isdisjoint(
+        {BULLISH, BEARISH, SIGNAL_COLOR, *BOX_COLORS.values(), *HAND_COLORS}
+    )
+
+
+def test_el_replay_no_ensena_entradas_ni_salidas_mas_alla_del_reloj(drawn: dict) -> None:
+    for label in ("capital-en-la-entrada", "capital-en-m15", "capital-tras-la-salida"):
+        step = _step(drawn, label)
+        assert step["plot"]["entries"], f"«{label}» debería enseñar alguna entrada"
+        for traza in step["plot"]["entries"]:
+            assert traza["maxX"][:16] <= _reloj(step), f"«{label}»"
+
+
+def _capital(entradas: list[dict], origen: int, reloj: int) -> tuple[float, int, int]:
+    """El capital a mano: 50 $, el 10 % del capital de cada momento en cada
+    entrada posterior al arranque, y su R al salir. Devuelve (capital,
+    cerradas, abiertas)."""
+    dentro = [e for e in entradas if origen < e["at"] <= reloj]
+    eventos = sorted(
+        [(e["at"], 1, n) for n, e in enumerate(dentro)]
+        + [(e["exitAt"], 0, n) for n, e in enumerate(dentro)
+           if e["exitAt"] is not None and e["exitAt"] <= reloj]
+    )
+    capital, riesgo, cerradas = 50.0, {}, 0
+    for _, entra, n in eventos:
+        if entra:
+            riesgo[n] = round(capital * 0.10, 2)
+        else:
+            capital = round(capital + round(riesgo[n] * dentro[n]["r"], 2), 2)
+            cerradas += 1
+    return capital, cerradas, len(dentro) - cerradas
+
+
+def _dinero(valor: float) -> str:
+    entero, decimales = f"{valor:.2f}".split(".")
+    return f"{int(entero):,}".replace(",", ".") + "," + decimales + " $"
+
+
+def test_el_capital_arranca_en_50_y_suma_cada_entrada_con_el_10_por_ciento(
+    run: ChartRun, drawn: dict
+) -> None:
+    entradas = build_payload(run)["symbols"][0]["entries"]
+    inicio = _step(drawn, "capital-inicio")
+    assert inicio["strategyCapital"].startswith("Capital 50,00 $ · 0 cerradas")
+    origen = _minuto(_reloj(inicio))
+    for label in ("capital-en-la-entrada", "capital-tras-la-salida"):
+        step = _step(drawn, label)
+        capital, cerradas, abiertas = _capital(entradas, origen, _minuto(_reloj(step)))
+        assert step["strategyCapital"].startswith(f"Capital {_dinero(capital)} · "), label
+        assert f"{cerradas} cerrada" in step["strategyCapital"], label
+        assert f"la siguiente arriesga {_dinero(round(capital * 0.10, 2))}" in (
+            step["strategyCapital"]
+        ), label
+        if abiertas:
+            assert "abierta" in step["strategyCapital"], label
+    tras = _step(drawn, "capital-tras-la-salida")
+    assert not tras["strategyCapital"].startswith("Capital 50,00 $"), (
+        "tras la primera salida el capital se debería haber movido"
+    )
+    assert _step(drawn, "capital-fuera")["strategyCapital"] == (
+        "Capital 50,00 $ · arranca con el replay"
+    )
 
 
 # --- El selector de par --------------------------------------------------------

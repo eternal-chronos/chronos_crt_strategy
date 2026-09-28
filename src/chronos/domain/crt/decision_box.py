@@ -57,11 +57,13 @@ COLUMNS = ("kind", "direction", "reference", "known", "high", "low", "replaced",
 
 @dataclass(frozen=True, slots=True)
 class DecisionSchedule:
-    """El horario de la caja, en la hora de pared de ``timezone``."""
+    """El horario del día, en la hora de pared de ``timezone``: la caja, la
+    ventana de entradas y la vida máxima de una posición."""
 
     timezone: str = "America/New_York"
     decision: time = time(2, 0)
     window_end: time = time(12, 0)
+    position_end: time = time(16, 30)
 
 
 NEW_YORK = DecisionSchedule()

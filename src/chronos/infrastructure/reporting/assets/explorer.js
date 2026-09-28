@@ -2,10 +2,13 @@
  *
  * El chasis del gráfico: velas o cierres, cuatro temporalidades, cuatro pares,
  * ventana de fechas, zoom, replay y las herramientas con las que el propietario
- * marca a mano encima del precio. Encima, TRES capas calculadas: la caja de las
- * 02:00 NY de H3, que se ve en H3 y en H1, la señal de confirmación de H1, sólo
- * en H1, y su confirmación en H4, sólo en H4. Llegan resueltas del motor y aquí sólo se pintan, cada una con
- * sus trazas, su entrada en la leyenda y su línea en el estado.
+ * marca a mano encima del precio. Encima, CUATRO capas calculadas: la caja de
+ * las 02:00 NY de H3, que se ve en H3 y en H1, la señal de confirmación de H1,
+ * sólo en H1, su confirmación en H4, sólo en H4, y las entradas, en H4, H3, H1
+ * y M15. Llegan resueltas del motor y aquí sólo se pintan, cada una con sus
+ * trazas, su entrada en la leyenda y su línea en el estado. Lo único que se
+ * cuenta aquí es el capital de la estrategia durante el replay: la suma del R
+ * de cada operación desde donde arranca, que lo elige el propietario.
  *
  * El estado visible es mínimo y la figura se reconstruye entera en cada cambio
  * con Plotly.react. Es más barato de razonar que llevar la cuenta de índices de
@@ -79,6 +82,9 @@
      * Guardarlo aparte permite ir y volver entre temporalidades —y entre
      * PARES— sin perder resolución. */
     at: 0,
+    /* Dónde arrancó el replay: el capital de la estrategia cuenta las entradas
+     * posteriores. */
+    origin: 0,
     forming: true,     // armar la vela en curso con la temporalidad inferior
     playing: false,
     speed: 700,        // milisegundos entre pasos
@@ -527,6 +533,178 @@
         "mismo lado";
     return text + "; línea continua en el extremo barrido, a trazos en el otro · " +
       (count ? count + " a la vista" : "ninguna a la vista");
+  }
+
+  // --- Entradas (capa calculada) ------------------------------------------------
+
+  /* Llegan RESUELTAS del motor: cuándo entra cada operación —al cierre de la
+   * vela de 15M que abre al confirmar H4—, a qué precio, su stop (el extremo del
+   * turtle soup), su take (el objetivo del rango de H3) y cuándo y por qué sale.
+   * Aquí sólo se pintan: el tramo del take y el del stop, desde la entrada hasta
+   * la salida, y una marca en la salida.
+   *
+   * Se ven en H4, H3, H1 y M15, cada una desde que entra; en replay, sin pasar
+   * del reloj: una operación que todavía no ha salido se estira hasta él y no
+   * enseña su salida. */
+  var ENTRY_CHARTS = ["H4", "H3", "H1", "M15"];
+  var ENTRY_NAMES = {
+    take: "Entrada · tramo del take",
+    stop: "Entrada · tramo del stop",
+    mark: "Entrada · salida"
+  };
+  var EXIT_NAMES = { take: "take", stop: "stop", "cierre_16:30": "cierre de las 16:30 NY" };
+
+  function entriesShown() { return ENTRY_CHARTS.indexOf(state.chart) >= 0 && !blindfolded(); }
+
+  /* Hasta dónde se sabe: en replay, el reloj; fuera, el cierre de la última vela
+   * a la vista. */
+  function entryEdge(cut) {
+    return state.replay ? state.at : bars().t[cut.end - 1] + span(state.chart);
+  }
+
+  function visibleEntries(cut) {
+    if (!entriesShown() || cut.end <= cut.start) { return []; }
+    var lo = bars().t[cut.start];
+    var edge = entryEdge(cut);
+    return (sym().entries || []).filter(function (trade) {
+      var end = trade.exitAt === null ? edge : Math.min(trade.exitAt, edge);
+      return trade.at <= edge && end >= lo;
+    }).map(function (trade) {
+      var closed = trade.exitAt !== null && trade.exitAt <= edge;
+      return {
+        trade: trade, closed: closed,
+        from: Math.max(trade.at, lo), to: closed ? trade.exitAt : edge
+      };
+    });
+  }
+
+  function entryRatio(trade) {
+    var risk = Math.abs(trade.entry - trade.stop);
+    return risk > 0 ? Math.abs(trade.take - trade.entry) / risk : 0;
+  }
+
+  function entryCaption(item) {
+    var trade = item.trade;
+    var text = "Entrada (calculada) · " + (trade.dir === "bullish" ? "COMPRA" : "VENTA") +
+      " al cierre de la vela de 15M, " + stamp(trade.at) +
+      "<br>entrada " + price(trade.entry) + " · stop " + price(trade.stop) +
+      " (extremo del turtle soup) · take " + price(trade.take) +
+      " (objetivo del rango de H3) · R:R " + ratioLabel(entryRatio(trade));
+    return text + (item.closed
+      ? "<br>salida por " + EXIT_NAMES[trade.reason] + " a " + price(trade.exit) + ", " +
+        stamp(trade.exitAt) + " · " + signedR(trade.r)
+      : "<br>abierta");
+  }
+
+  function entryTraces(cut) {
+    var shown = visibleEntries(cut);
+    if (!shown.length) { return []; }
+    var traces = ["take", "stop"].map(function (level) {
+      var x = [], y = [], text = [];
+      shown.forEach(function (item) {
+        var caption = entryCaption(item);
+        var far = item.trade[level];
+        [item.from, item.to, item.to, item.from, item.from].forEach(function (minute) { x.push(iso(minute)); });
+        [far, far, item.trade.entry, item.trade.entry, far].forEach(function (value) { y.push(value); });
+        for (var i = 0; i < 5; i++) { text.push(caption); }
+        x.push(null); y.push(null); text.push(null);
+      });
+      return {
+        type: "scatter", mode: "lines", name: ENTRY_NAMES[level],
+        x: x, y: y, fill: "toself", fillcolor: rgba(COLORS.entries[level], 0.18),
+        line: { color: COLORS.entries[level], width: 1.2 },
+        text: text, hoverinfo: "text", hoveron: "points+fills", hoverlabel: { align: "left" }
+      };
+    });
+    var closed = shown.filter(function (item) { return item.closed; });
+    if (closed.length) {
+      traces.push({
+        type: "scatter", mode: "markers", name: ENTRY_NAMES.mark,
+        x: closed.map(function (item) { return iso(item.trade.exitAt); }),
+        y: closed.map(function (item) { return item.trade.exit; }),
+        marker: {
+          size: 10, symbol: "x",
+          color: closed.map(function (item) {
+            return item.trade.r > 0 ? COLORS.entries.take : COLORS.entries.stop;
+          })
+        },
+        text: closed.map(entryCaption), hoverinfo: "text", hoverlabel: { align: "left" }
+      });
+    }
+    return traces;
+  }
+
+  function entryLayerCaption(cut) {
+    if (ENTRY_CHARTS.indexOf(state.chart) < 0) {
+      return "entradas (calculadas): sólo se dibujan en H4, H3, H1 y M15";
+    }
+    if (blindfolded()) { return "entradas (calculadas): ocultas hasta Revelar"; }
+    var count = visibleEntries(cut).length;
+    return "ENTRADAS (calculadas por el motor): con H3, H1 y H4 cumplidos, al cierre de la " +
+      "vela de 15M en curso; stop en el extremo del turtle soup, take en el objetivo del " +
+      "rango de H3; si toca los dos en la misma vela de 15M cuenta el stop; a las 16:30 NY " +
+      "se cierra; como mucho 2 al día · " + (count ? count + " a la vista" : "ninguna a la vista");
+  }
+
+  /* --- Capital de la estrategia -------------------------------------------------
+   *
+   * Arranca con 50 $ al empezar el replay y cuenta las operaciones que ENTRAN
+   * después: cada una arriesga el 10 % del capital que hay cuando entra y, al
+   * salir, suma o resta su resultado en R por ese riesgo. Si gana una de 1 R con
+   * 50 $, quedan 55 $, y la siguiente arriesga 5,50 $.
+   *
+   * Es la suma de lo que ya ha dicho el motor —el R de cada operación—, contada
+   * desde donde arranca el replay, que lo elige el propietario. Retroceder el
+   * reloj la deshace; fuera del replay no hay nada que contar. */
+  var STRATEGY_CAPITAL = 50;
+  var STRATEGY_RISK = 0.10;
+
+  function strategyLedger() {
+    var ledger = { balance: STRATEGY_CAPITAL, wins: 0, losses: 0, closed: 0, open: 0 };
+    ledger.risk = round2(STRATEGY_CAPITAL * STRATEGY_RISK);
+    if (!state.replay) { return ledger; }
+    var trades = (sym().entries || []).filter(function (trade) {
+      return trade.at > state.origin && trade.at <= state.at;
+    });
+    // Las salidas antes que las entradas del mismo minuto: el capital con el que
+    // entra una es el que ya ha dejado la anterior.
+    var events = [];
+    trades.forEach(function (trade, index) {
+      events.push({ t: trade.at, exit: false, index: index });
+      if (trade.exitAt !== null && trade.exitAt <= state.at) {
+        events.push({ t: trade.exitAt, exit: true, index: index });
+      }
+    });
+    events.sort(function (a, b) { return a.t - b.t || (a.exit === b.exit ? 0 : a.exit ? -1 : 1); });
+    var risk = {};
+    events.forEach(function (event) {
+      var trade = trades[event.index];
+      if (!event.exit) { risk[event.index] = round2(ledger.balance * STRATEGY_RISK); return; }
+      ledger.balance = round2(ledger.balance + round2(risk[event.index] * trade.r));
+      ledger.closed += 1;
+      if (trade.r > 0) { ledger.wins += 1; } else if (trade.r < 0) { ledger.losses += 1; }
+    });
+    ledger.open = trades.length - ledger.closed;
+    ledger.risk = round2(ledger.balance * STRATEGY_RISK);
+    return ledger;
+  }
+
+  function strategySummary() {
+    if (!state.replay) {
+      return "Capital " + money(STRATEGY_CAPITAL) + " · arranca con el replay";
+    }
+    var ledger = strategyLedger();
+    return "Capital " + money(ledger.balance) + " · " +
+      plural(ledger.closed, "cerrada", "cerradas") + " (" + ledger.wins + " ganadas, " +
+      ledger.losses + " perdidas)" +
+      (ledger.open ? " · " + plural(ledger.open, "abierta", "abiertas") : "") +
+      " · la siguiente arriesga " + money(ledger.risk);
+  }
+
+  function strategyCaption() {
+    return "CAPITAL DE LA ESTRATEGIA: " + strategySummary() + " · parte de " +
+      money(STRATEGY_CAPITAL) + " al empezar el replay y cuenta las entradas desde ahí, " +
+      "arriesgando en cada una el 10 % del capital de ese momento";
   }
 
   /* La vela en formación. Se arma con las velas de la temporalidad inferior que
@@ -2349,7 +2527,8 @@
     var range = bounds();
     var cut = slice(range);
 
-    Plotly.react("chart", priceTraces(cut).concat(boxTraces(cut), signalTraces(cut)), layout(range), {
+    var traces = priceTraces(cut).concat(boxTraces(cut), signalTraces(cut), entryTraces(cut));
+    Plotly.react("chart", traces, layout(range), {
       responsive: true, scrollZoom: true, displaylogo: false,
       // Sin las herramientas de dibujo de Plotly: lo que se marca a mano son la
       // caja, los recuadros y las líneas de este explorador, que se numeran, se
@@ -2381,7 +2560,7 @@
       return "AUDITORÍA CIEGA · semilla " + state.seed + " · " + sym().label + " · " +
         label(state.chart) + " · " + range.from + " → " + range.to + " · " +
         visible.toLocaleString("es-ES") + " velas. Marca lo que veas y pulsa Revelar. " +
-        boxCaption(cut) + ". " + signalCaption(cut) + ". " +
+        boxCaption(cut) + ". " + signalCaption(cut) + ". " + entryLayerCaption(cut) + ". " +
         "Sorteada dentro de " + state.scope.from + " → " + state.scope.to + "." +
         (simulada ? " · " + simulada : "") +
         (recuadros ? " · " + recuadros : "") +
@@ -2414,8 +2593,9 @@
     // Lo que este explorador NO dibuja. Con el gráfico pelado, la ausencia de
     // marcas se lee como que ahí no pasó nada, y lo que pasa es que todavía no
     // hay quien lo calcule: eso hay que decirlo, no dejarlo suponer.
-    text += " · SIN ESTRATEGIA: no hay entradas. " + boxCaption(cut) + ". " +
-      signalCaption(cut) + ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
+    text += " · " + entryLayerCaption(cut) + ". " + strategyCaption() + ". " +
+      boxCaption(cut) + ". " + signalCaption(cut) +
+      ". Todo lo demás que se dibuja encima del precio lo pone tu mano";
     if (sym().skipped && sym().skipped.length) {
       text += " · temporalidades sin velas en " + sym().label + ": " +
         sym().skipped.join(" · ");
@@ -2528,6 +2708,8 @@
     state.cursor = index;
     state.sub = 0;
     state.at = now_();
+    // Desde aquí cuenta el capital de la estrategia.
+    state.origin = state.at;
     draw();
   }
 
@@ -2837,6 +3019,7 @@
     document.getElementById("replay-start").textContent =
       state.replay ? "Reiniciar" : "Empezar";
     document.getElementById("replay-play").textContent = state.playing ? "⏸" : "▶";
+    document.getElementById("strategy-capital").textContent = strategySummary();
     document.getElementById("replay-forming").checked = state.forming;
     document.getElementById("replay-window").value = String(state.window);
     ["from", "to", "prev", "next"].forEach(function (id) {

@@ -15,12 +15,13 @@ estrategia corre sin cambios en backtest, paper y live**.
 **La estrategia está empezando.** Sobre el chasis —el histórico de XAUUSD,
 el único par de la estrategia, el explorador para mirarlo y marcar
 encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
-cuatro piezas calculadas: los rangos CRT con su ciclo de vida
+cinco piezas calculadas: los rangos CRT con su ciclo de vida
 (`domain/crt/ranges.py`), encima de ellos la **caja de las 02:00 NY en H3**
 (`domain/crt/decision_box.py`), que el explorador dibuja en H3 y en H1, la
 **señal de confirmación en H1** (`domain/crt/confirmation.py`), sólo en H1, y
 su **confirmación en H4** (`domain/crt/h4_confirmation.py`), sólo en H4, que es
-la señal para buscar entradas. En D, 12H, 6H y 15M no se dibuja nada calculado.
+la señal para buscar entradas, y las **entradas** (`domain/crt/entries.py`), en
+H4, H3, H1 y 15M. En D, 12H y 6H no se dibuja nada calculado.
 
 Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
 hay un rango CRT vivo en H3 la caja es su vela 1 (nacido en esa vela o antes);
@@ -56,13 +57,26 @@ vuelve a buscar en la vela de H3 siguiente, contra la caja nueva. Contra una
 caja que es un rango no se busca: se empieza en la vela de H3 siguiente a la que
 lo termina.
 
-Confirmación en H4 (la señal para buscar entradas; las entradas, sin
-programar): con la señal de H1 activa —desde el cierre de su vela hasta que
+Confirmación en H4 (la señal para buscar entradas): con la señal de H1 activa —desde el cierre de su vela hasta que
 cierra su vela de H3, nunca después de las 12:00 NY—, la vela de H4 **en curso**
 le hace turtle soup a la vela de H4 **inmediatamente anterior** del mismo lado
 que H1: le ha sacado ese extremo y el último cierre de H1 está de vuelta. Vale
 el primer cierre de H1 en que se cumpla. Si la H4 en curso le ha sacado los dos
 extremos a la anterior, no confirma.
+
+Entradas: con la confirmación de H4, que se sabe al cierre de una vela de H1, se
+espera a que cierre la vela de 15M en curso y se entra a su cierre, en el
+sentido de la señal. **Stop** en el extremo del turtle soup: lo más lejos que
+llegó el precio desde que abrió la vela de H1 de la señal hasta el cierre de la
+vela de 15M de la entrada. **Take** en el objetivo del rango de H3: el lado
+contrario de la caja contra la que saltó la señal; aunque luego nazca otra caja,
+ese take no se mueve. Sólo si la vela de 15M cierra a las 12:00 NY o antes y el
+precio de entrada queda entre stop y take; como mucho 2 al día. Sale en la
+primera vela de 15M que toca stop o take; si toca los dos, cuenta el stop. A las
+16:30 NY se cierra al cierre de esa vela. El explorador, en el replay, lleva el
+**capital de la estrategia**: 50 $ al empezar el replay, cada entrada posterior
+arriesga el 10 % del capital de ese momento y al salir suma o resta su R por ese
+riesgo.
 
 El resto del flujo está en la sección siguiente, por programar.
 
@@ -99,9 +113,9 @@ esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
   **ese día no se opera**.
 - **3H → confirmación**: un rango en el sentido de la dirección.
 - **1H → validación**: comprobar que el rango de 3H es bueno (criterio por definir).
-- **15M → entrada** (criterio por definir).
+- **15M → entrada**: programada en `entries.py` (ver arriba).
 
-**Take profit** (con las entradas, cuando se cumplan a la vez H3, H1 y H4): el
+**Take profit** (ya programado en `entries.py`, con las entradas): el
 take va en el **objetivo del rango de H3**: siempre es un rango, y el objetivo
 es siempre su lado contrario. Si antes de que el precio llegue a ese
 objetivo nace un rango nuevo (una caja nueva), la operación abierta **no se

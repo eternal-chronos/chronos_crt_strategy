@@ -66,6 +66,7 @@ function declare(id) {
  'account-buttons', 'account-undo', 'account-reset', 'account-copy', 'account-summary',
  'replay-group', 'replay-date', 'replay-start', 'replay-back', 'replay-step',
  'replay-play', 'replay-exit', 'replay-forming', 'replay-speed', 'replay-window',
+ 'strategy-capital',
  'notes', 'explorer-data'].forEach(declare);
 
 elements['explorer-data'].textContent = fs.readFileSync(payloadPath, 'utf8');
@@ -146,6 +147,10 @@ function signalLayer(name) {
     /^Señal H4 · (línea del turtle soup|otro extremo|buscar entradas)$/.test(name || '');
 }
 
+function entryLayer(name) {
+  return /^Entrada · (tramo del take|tramo del stop|salida)$/.test(name || '');
+}
+
 function simShape(shape) {
   return String(shape.name || '').indexOf('sim-') === 0;
 }
@@ -224,6 +229,21 @@ global.Plotly = {
             captions: (trace.text || []).filter(function (value) { return value; }),
           };
         }),
+      // Las entradas: los dos tramos (cinco vértices y un corte por operación) y
+      // las marcas de salida.
+      entries: traces.filter(function (trace) { return entryLayer(trace.name); })
+        .map(function (trace) {
+          const xs = (trace.x || []).filter(function (value) { return value; });
+          return {
+            name: trace.name,
+            x: trace.x.slice(),
+            y: trace.y.slice(),
+            maxX: xs.length ? xs.slice().sort()[xs.length - 1] : null,
+            fill: trace.fill || null,
+            color: (trace.line && trace.line.color) || (trace.marker && trace.marker.color) || null,
+            captions: (trace.text || []).filter(function (value) { return value; }),
+          };
+        }),
       traces: traces.map(function (trace) {
         return {
           name: trace.name,
@@ -296,6 +316,7 @@ function snapshot(label) {
     replayDate: elements['replay-date'].value,
     zoomFree: elements['zoom-reset'].disabled === true,
     replayPlay: elements['replay-play'].textContent,
+    strategyCapital: elements['strategy-capital'].textContent,
     lastRelayout: relayoutCalls[relayoutCalls.length - 1] || null,
     replayLocked: elements['from'].disabled === true && elements['next'].disabled === true,
     simArmed: pressed('sim-buttons', 'side'),
@@ -813,6 +834,46 @@ if (payload.symbols.length > 1) {
 elements['rect-clear'].fire('click');
 elements['line-clear'].fire('click');
 steps.push(snapshot('marcas-limpias'));
+
+// --- Entradas y capital de la estrategia ---------------------------------------
+//
+// El replay arranca el día antes de la primera operación que sale y avanza en
+// H1 —con la vela en formación, de 15M en 15M— hasta que el reloj pasa su
+// salida. Por el camino, una foto en M15 con alguna entrada a la vista.
+function relojEnMinutos() {
+  const marca = /reloj (\d{4}-\d{2}-\d{2}) (\d{2}:\d{2})/.exec(elements['notes'].textContent);
+  return marca ? minuteOf(marca[1] + ' ' + marca[2] + ':00') : null;
+}
+
+const conSalida = (payload.symbols[0].entries || []).filter(function (trade) {
+  return trade.exitAt !== null;
+})[0];
+if (conSalida && payload.symbols[0].charts.indexOf('H1') >= 0) {
+  selectChart('H1');
+  presets[0].fire('click');
+  elements['replay-date'].value = new Date((conSalida.at - 1440) * 60000)
+    .toISOString().slice(0, 10);
+  elements['replay-start'].fire('click');
+  steps.push(snapshot('capital-inicio'));
+  let pasos = 0;
+  while (relojEnMinutos() < conSalida.at && pasos < 5000) {
+    elements['replay-step'].fire('click');
+    pasos += 1;
+  }
+  steps.push(snapshot('capital-en-la-entrada'));
+  if (payload.symbols[0].charts.indexOf('M15') >= 0) {
+    selectChart('M15');
+    steps.push(snapshot('capital-en-m15'));
+    selectChart('H1');
+  }
+  while (relojEnMinutos() < conSalida.exitAt && pasos < 5000) {
+    elements['replay-step'].fire('click');
+    pasos += 1;
+  }
+  steps.push(snapshot('capital-tras-la-salida'));
+  elements['replay-exit'].fire('click');
+  steps.push(snapshot('capital-fuera'));
+}
 
 // --- Auditoría ciega -----------------------------------------------------------
 // En H3, donde hay capa calculada que ocultar.

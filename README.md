@@ -1,11 +1,11 @@
 # chronos-crt-strategy
 
-Laboratorio de trading algorítmico sobre **XAUUSD, EURUSD, GBPUSD y USDJPY**.
+Laboratorio de trading algorítmico sobre **XAUUSD** (el único par de la estrategia).
 
 **Todavía no hay estrategia, y es a propósito.** Lo que hay es el chasis, con
 todo lo que hace falta para escribir una encima:
 
-- un **explorador HTML** autocontenido con los cuatro pares dentro, cuatro
+- un **explorador HTML** autocontenido con el oro dentro, sus
   temporalidades, replay paso a paso, zoom de trading y herramientas para marcar
   a mano encima del precio;
 - la **carga y agregación del histórico** M1 → M15 / H1 / H4 / Diario, con la
@@ -30,16 +30,16 @@ source .venv/bin/activate
 ## El explorador
 
 Es la herramienta principal mientras no haya estrategia: se abre con doble clic,
-funciona sin conexión y lleva los cuatro históricos dentro del mismo fichero.
+funciona sin conexión y lleva el histórico del oro dentro del fichero.
 
 ```bash
 # 1. Traer el histórico. Tiene que ser M1: la verificación horaria mide el rango
 #    medio POR MINUTO y con velas de una hora no distingue 13:30 de 13:00.
 #    OJO: son varios GB y horas de descarga. Se reanuda si se corta.
-chronos data dukascopy -g m1 -s XAUUSD,EURUSD,GBPUSD,USDJPY \
+chronos data dukascopy -g m1 -s XAUUSD \
   --from 2018-01-01 --to 2025-12-31 --sides bid
 
-# 2. Verificar la zona horaria de cada par. Obligatorio antes de mirar nada.
+# 2. Verificar la zona horaria. Obligatorio antes de mirar nada.
 chronos chart verify-tz --config config/explorer.yaml
 
 # 3. Qué hay cargado: pares, temporalidades, velas y tramo de cada una.
@@ -123,9 +123,9 @@ actualizarlo a propósito; no borrarlo.
 
 ```
 config/
-  explorer.yaml            # los cuatro pares, la rejilla y las marcas a mano
+  explorer.yaml            # el oro, la rejilla y las marcas a mano
   backtest.yaml            # una corrida del motor
-  instruments/*.yaml       # ficha de cada símbolo: ticks, costes, swap, sesión
+  instruments/xauusd.yaml  # ficha del oro: ticks, costes, swap, sesión
 data/
   raw/dukascopy/           # .bi5 crudos: caché de descarga, reanudable
   processed/               # parquet canónico por par y lado
@@ -141,16 +141,13 @@ src/chronos/
 tests/
 ```
 
-## Multi-par: lo que no se puede olvidar
+## El par: lo que no se puede olvidar
 
-- El **pip es la última cifra del precio de cada par**: 2 decimales en el oro, 5
-  en EURUSD y GBPUSD, 3 en USDJPY. Nada de decimales fijos en el código.
-- Nada de umbrales en unidades de precio absolutas: «20 puntos» no significa lo
-  mismo en dos pares. ATR, pips del par o fracción de un rango.
-- **USDJPY liquida en yenes y el motor no convierte a la divisa de la cuenta.**
-  Su backtest sirve para mirar estructura y múltiplos de R, no el dinero. Está
-  avisado en `config/instruments/usdjpy.yaml`.
-- Las fichas de instrumento traen valores de partida que **hay que verificar**
+- El **pip del oro es la segunda cifra decimal** y sale de la configuración.
+  Nada de decimales fijos en el código.
+- Nada de umbrales en unidades de precio absolutas: ATR, pips o fracción de un
+  rango.
+- La ficha de instrumento trae valores de partida que **hay que verificar**
   contra la ficha real de tu cuenta en cTrader: spread, comisión, swap y
   apalancamiento cambian por entidad y tipo de cuenta.
 

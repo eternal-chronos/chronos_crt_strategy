@@ -1,7 +1,7 @@
 [project]
 name = "chronos-crt-strategy"
 version = "0.1.0"
-description = "Laboratorio multi-par (XAUUSD, EURUSD, GBPUSD, USDJPY): explorador de velas y motor de backtest, sin estrategia"
+description = "Laboratorio sobre XAUUSD: explorador de velas y motor de backtest, sin estrategia"
 readme = "README.md"
 requires-python = ">=3.12,<3.13"
 license = { text = "Proprietary" }

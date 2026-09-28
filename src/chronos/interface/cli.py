@@ -36,7 +36,7 @@ from chronos.infrastructure.reporting.report import ReportWriter
 from chronos.interface.chart_cli import chart_app
 
 app = typer.Typer(
-    help="Laboratorio de backtesting multi-par: XAUUSD, EURUSD, GBPUSD y USDJPY.",
+    help="Laboratorio de backtesting sobre XAUUSD.",
     no_args_is_help=True,
     add_completion=False,
 )
@@ -206,8 +206,8 @@ def data_dukascopy(
 ) -> None:
     """Descarga el histórico de Dukascopy con bid y ask separados.
 
-    `--symbol` admite VARIOS pares separados por coma: los cuatro del explorador
-    se bajan de una sentada con `-s XAUUSD,EURUSD,GBPUSD,USDJPY`.
+    `--symbol` admite varios símbolos separados por coma; la estrategia sólo
+    usa `-s XAUUSD`.
 
     Guarda los `.bi5` crudos en la caché, así que una descarga interrumpida se
     reanuda sin volver a pedir al servidor lo que ya tiene.

@@ -1,16 +1,13 @@
-# Explorador de velas — los cuatro pares del proyecto.
+# Explorador de velas — XAUUSD, el único par de la estrategia.
 #
 # Aquí NO hay ni un parámetro de estrategia, y es a propósito: este fichero
 # declara de dónde salen las velas y cómo se dibujan, nada de qué se decide.
 # Cuando exista una estrategia, su configuración va en su propio fichero.
 #
-# Los cuatro históricos viajan DENTRO del mismo HTML: cambiar de par en el
-# explorador no abre otro fichero, cambia de qué velas se leen.
+# El histórico viaja DENTRO del HTML. Si no está descargado, se avisa. Para
+# bajarlo:
 #
-# Los pares sin histórico descargado NO rompen la corrida: se avisa de cuáles
-# faltan y se dibujan los que hay. Para bajarlos:
-#
-#   chronos data dukascopy -g m1 -s XAUUSD,EURUSD,GBPUSD,USDJPY \
+#   chronos data dukascopy -g m1 -s XAUUSD \
 #     --from 2018-01-01 --to 2025-12-31 --sides bid
 #
 # Tiene que ser M1: la verificación de zona horaria mide el rango medio POR
@@ -27,7 +24,7 @@ price_side: bid
 # pueda: se avisa de cuál falta y por qué.
 timeframes: [D, H6, H4, H3, H1, M15]
 
-# --- Los pares --------------------------------------------------------------
+# --- El par -----------------------------------------------------------------
 #
 # `decimals` es con cuántas cifras se DIBUJA el precio, y de ahí sale el pip con
 # el que se miden las distancias a mano: la última cifra que se enseña. No tiene
@@ -45,33 +42,6 @@ symbols:
     # Gráficos propios del oro: los generales más H12. Con el ancla de sesión,
     # H12 parte el día en dos: abre a las 17:00 y a las 05:00 de Nueva York.
     timeframes: [D, H12, H6, H4, H3, H1, M15]
-
-  - symbol: EURUSD
-    label: EURUSD
-    bid_path: data/processed/EURUSD_M1_bid.parquet
-    ask_path: ""
-    timezone: UTC
-    start: null
-    end: null
-    decimals: 5
-
-  - symbol: GBPUSD
-    label: GBPUSD
-    bid_path: data/processed/GBPUSD_M1_bid.parquet
-    ask_path: ""
-    timezone: UTC
-    start: null
-    end: null
-    decimals: 5
-
-  - symbol: USDJPY
-    label: USDJPY
-    bid_path: data/processed/USDJPY_M1_bid.parquet
-    ask_path: ""
-    timezone: UTC
-    start: null
-    end: null
-    decimals: 3
 
 # --- Agregación -------------------------------------------------------------
 #

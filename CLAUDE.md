@@ -12,8 +12,8 @@ estrategia corre sin cambios en backtest, paper y live**.
 
 ## Dónde está el proyecto
 
-**La estrategia está empezando.** Sobre el chasis —el histórico de cuatro
-pares (XAUUSD, EURUSD, GBPUSD y USDJPY), el explorador para mirarlos y marcar
+**La estrategia está empezando.** Sobre el chasis —el histórico de XAUUSD,
+el único par de la estrategia, el explorador para mirarlo y marcar
 encima a mano, y el motor de backtest con su contrato de estrategia vacío— ya hay
 cuatro piezas calculadas: los rangos CRT con su ciclo de vida
 (`domain/crt/ranges.py`), encima de ellos la **caja de las 02:00 NY en H3**
@@ -68,7 +68,7 @@ esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
 
 **Rangos CRT** (`domain/crt/ranges.py`): sus reglas valen igual en **D, 12H,
 6H, 4H, 3H y 1H**. No en 15M ni menores. H6 y H3 ya existen en el explorador
-(teclas `6` y `3`) en los cuatro pares; H12 de momento sólo en el oro.
+(teclas `6` y `3`), y también H12.
 
 **Horario (hora de Nueva York, `America/New_York`, con su horario de verano):**
 
@@ -133,21 +133,15 @@ Contrato de barras: índice `DatetimeIndex` UTC, monótono, sin duplicados; colu
 `open/high/low/close/volume`; sin NaN; la barra en `t` está cerrada en `t`.
 Validar al entrar a `application/`, no en cada función.
 
-## Multi-par
+## Par
 
-Todo lo que se escriba tiene que valer para los cuatro pares desde el principio:
-XAUUSD, EURUSD, GBPUSD y USDJPY. Concretamente:
+La estrategia es **sólo XAUUSD**. No se añaden otros pares.
 
-- **Nada de decimales fijos.** El pip es la última cifra del precio *de ese par*:
-  2 en el oro, 5 en EURUSD y GBPUSD, 3 en USDJPY. Sale de la configuración.
-- **Nada de umbrales en unidades de precio absolutas.** «20 puntos» significa
-  cosas distintas en cada par; si una regla necesita una distancia, que sea en
-  ATR, en pips del par o en fracción de un rango, nunca un número suelto.
-- Un parámetro que sólo valga para un par se declara por par en el YAML, no se
-  esconde en el código.
-- **USDJPY liquida en yenes y el motor NO convierte.** Su backtest sirve para
-  mirar estructura y múltiplos de R, no para juzgar el dinero. Está escrito en
-  `config/instruments/usdjpy.yaml` y hay que respetarlo.
+- **Nada de decimales fijos en el código.** El pip del oro (2 decimales) sale de
+  la configuración.
+- **Nada de umbrales en unidades de precio absolutas.** Si una regla necesita
+  una distancia, que sea en ATR, en pips o en fracción de un rango, nunca un
+  número suelto.
 
 ## Correctitud temporal
 

@@ -26,7 +26,12 @@ Caja de las 02:00: al cierre de la vela de H3 anterior a la de las 02:00 NY, si
 hay un rango CRT vivo en H3 la caja es su vela 1 (nacido en esa vela o antes);
 si no, la vela anterior aunque no sea rango. En H3 un rango sólo muere al tocar
 su objetivo o cerrar más allá del otro extremo: el `rechazo` (turtle soup a la
-vela anterior) es regla del Diario y en H3 no cuenta (`rejection=False`). Si
+vela anterior) es regla del Diario y en H3 no cuenta (`rejection=False`).
+Hasta que un rango no termina no hay más rangos, y la vela de H3 que lo termina
+no hace nacer ninguno aunque le saque un extremo a la anterior y cierre dentro
+(`birth_on_end=False`): esa vela queda marcada y la siguiente se mide contra
+ella (le saca un extremo y cierra dentro → rango; cierra fuera o no toca
+ninguno → la nueva queda marcada). Si
 la vela de las 02:00 **cierra** fuera de la caja (por arriba o por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
 (rechazo), la caja se mantiene. Después, una caja queda **inhabilitada cuando el
 precio toca un extremo y luego el otro** (en la misma vela o en velas

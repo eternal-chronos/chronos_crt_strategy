@@ -101,6 +101,25 @@ def test_sin_rechazo_el_turtle_soup_no_lo_frena_ni_abre_el_contrario() -> None:
     assert rangos.iloc[0]["end"] == -1
 
 
+def test_sin_nacer_al_terminar_la_vela_que_lo_termina_no_abre_otro() -> None:
+    """H3: la vela que toca el objetivo y le saca el bajo a la anterior cerrando
+    dentro no abre el alcista; el siguiente rango la tiene a ella de vela 1."""
+    rangos = crt_ranges(
+        _bars(
+            VELA_1,
+            BARRIDO_ARRIBA,
+            (1925.0, 1891.0, 1915.0),
+            (1927.0, 1900.0, 1920.0),
+        ),
+        rejection=False,
+        birth_on_end=False,
+    )
+    assert rangos["direction"].tolist() == [BEARISH, BEARISH]
+    assert rangos["end"].tolist() == [2, -1]
+    assert rangos["end_reason"].tolist() == [TARGET_HIT, ""]
+    assert rangos.iloc[1]["reference"] == 2
+
+
 def test_la_vela_que_lo_frena_abre_el_rango_contrario_si_cumple() -> None:
     """Saca el bajo de la anterior y cierra DENTRO de ella: muere el bajista, nace el alcista."""
     rangos = crt_ranges(

@@ -75,6 +75,17 @@ def test_en_h3_el_turtle_soup_a_la_vela_anterior_no_mata_el_rango() -> None:
     assert (caja["high"], caja["low"]) == (110.0, 100.0)
 
 
+def test_la_vela_que_termina_el_rango_no_abre_otro_y_es_ella_la_caja() -> None:
+    # La de las 23:00 toca el mínimo de la vela 1 (termina el bajista), le saca
+    # el mínimo a la de las 20:00 y cierra dentro: en H3 eso no abre un
+    # alcista; la caja es ella.
+    velas = (*RANGO_BAJISTA[:2], (109.0, 99.0, 106.0), (108.0, 100.0, 104.0))
+    caja = decision_boxes(_h3(*velas)).iloc[0]
+    assert caja["kind"] == PREVIOUS_BAR
+    assert (caja["reference"], caja["known"]) == (2, 2)
+    assert (caja["high"], caja["low"]) == (109.0, 99.0)
+
+
 def test_si_la_vela_de_las_2_cierra_fuera_pasa_a_ser_la_caja() -> None:
     cajas = decision_boxes(_h3(*RANGO_BAJISTA, (112.0, 106.0, 111.0)))
     assert cajas["kind"].tolist() == [RANGE, BREAKOUT]

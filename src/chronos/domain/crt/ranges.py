@@ -25,6 +25,10 @@ sin frenar al vivo (le saca el extremo a la vela anterior y cierra de vuelta
 dentro), así que en esa misma vela muere el viejo y nace el nuevo. Sin él, el
 contrario también se ignora mientras el vivo no muera.
 
+Con ``birth_on_end=False`` (H3) la vela que termina un rango no hace nacer
+ninguno, aunque le saque un extremo a la anterior y cierre dentro: el siguiente
+rango, si lo hay, la tiene a ella o a una posterior de vela 1.
+
 Agnóstico a par y a temporalidad: se compara precio con precio de la misma serie
 y no hay ni un umbral.
 """
@@ -47,14 +51,18 @@ TARGET_HIT = "objetivo"
 COLUMNS = ("direction", "reference", "confirmation", "high", "low", "end", "end_reason")
 
 
-def crt_ranges(bars: pd.DataFrame, *, rejection: bool = True) -> pd.DataFrame:
+def crt_ranges(
+    bars: pd.DataFrame, *, rejection: bool = True, birth_on_end: bool = True
+) -> pd.DataFrame:
     """Los rangos CRT de la serie, en orden, con su final.
 
     Devuelve una fila por rango con posiciones enteras sobre ``bars``:
     ``reference`` (vela 1), ``confirmation`` (vela 2, la que lo hace existir al
     cerrar), ``end`` (la vela que lo frenó, -1 si sigue vivo) y ``end_reason``.
     ``high``/``low`` son los de la vela 1. ``rejection`` dice si el turtle soup a
-    la vela anterior frena el rango: sí en el Diario, no en H3.
+    la vela anterior frena el rango: sí en el Diario, no en H3. ``birth_on_end``
+    dice si la vela que termina un rango puede hacer nacer otro: sí en el
+    Diario, no en H3.
 
     El nacimiento y los frenos que sólo miran la vela anterior se calculan
     vectorizados; lo que queda es un recorrido de estado —un rango vivo o
@@ -85,6 +93,7 @@ def crt_ranges(bars: pd.DataFrame, *, rejection: bool = True) -> pd.DataFrame:
     rows: list[_Range] = []
     alive: _Range | None = None
     for index in range(1, size):
+        ended_here = False
         if alive is not None:
             rejected = rejects_bearish[index] if alive.direction == BEARISH else rejects_bullish[index]
             reason = alive.end_reason_at(close[index], high[index], low[index], bool(rejected))
@@ -92,7 +101,8 @@ def crt_ranges(bars: pd.DataFrame, *, rejection: bool = True) -> pd.DataFrame:
                 alive.end = index
                 alive.end_reason = reason
                 alive = None
-        if alive is None and births[index]:
+                ended_here = True
+        if alive is None and births[index] and (birth_on_end or not ended_here):
             alive = _Range(
                 direction=int(births[index]),
                 reference=index - 1,

@@ -32,6 +32,10 @@ no hace nacer ninguno aunque le saque un extremo a la anterior y cierre dentro
 (`birth_on_end=False`): esa vela queda marcada y la siguiente se mide contra
 ella (le saca un extremo y cierra dentro → rango; cierra fuera o no toca
 ninguno → la nueva queda marcada). Si
+la caja es un rango, **se espera a que termine** (toca su objetivo o cierra más
+allá del otro extremo), en la vela de las 02:00 o después: al cerrar, la vela
+que lo termina pasa a ser la caja (`fin_rango`), y mientras el rango vive no le
+aplica nada más. Si la caja es una vela y
 la vela de las 02:00 **cierra** fuera de la caja (por arriba o por abajo), al cerrar pasa a ser ella la caja; si saca la mecha y cierra dentro
 (rechazo), la caja se mantiene. Después, una caja queda **inhabilitada cuando el
 precio toca un extremo y luego el otro** (en la misma vela o en velas
@@ -48,7 +52,9 @@ de la caja. Se marcan el extremo barrido y el otro extremo de la vela anterior.
 Cada vela de H3 empieza de cero, cuenta la primera señal de cada una, y sólo
 las velas de H1 que cierran a las 12:00 NY o antes. Una caja barrida muere en
 la vela de H1 que le toca el segundo extremo: desde ella no hay señal, y se
-vuelve a buscar en la vela de H3 siguiente, contra la caja nueva.
+vuelve a buscar en la vela de H3 siguiente, contra la caja nueva. Contra una
+caja que es un rango no se busca: se empieza en la vela de H3 siguiente a la que
+lo termina.
 
 Confirmación en H4 (la señal para buscar entradas; las entradas, sin
 programar): con la señal de H1 activa —desde el cierre de su vela hasta que

@@ -10,8 +10,14 @@ vela anterior— se marca una caja:
 - si no lo hay, la caja es la vela anterior, sea o no un rango. Si la vela que
   terminó el rango es la anterior, la caja es ella.
 
-Desde ahí, vela a vela, cada caja puede quedar inhabilitada y sustituida por la
-vela que la inhabilita, al cierre de esa vela:
+Si la caja es un rango, se espera a que termine (toca su objetivo o cierra más
+allá del otro extremo, como en ``ranges.py``), en la vela de las 02:00 o en una
+posterior: al cierre, la vela que lo termina pasa a ser la caja (``fin_rango``).
+Mientras el rango vive no le aplica nada más. Si no termina antes de las 12:00,
+la caja del día es el rango.
+
+Desde que la caja es una vela, vela a vela, puede quedar inhabilitada y
+sustituida por la vela que la inhabilita, al cierre de esa vela:
 
 - ``ruptura``: la vela de las 02:00 CIERRA fuera de la caja, por arriba o por
   abajo. Si sólo saca la mecha y cierra dentro (rechazo), la caja se mantiene.
@@ -44,6 +50,7 @@ RANGE = "rango"                 # el rango CRT vivo antes de las 02:00
 PREVIOUS_BAR = "vela_previa"    # sin rango vivo: la vela anterior a las 02:00
 BREAKOUT = "ruptura"            # la vela de las 02:00, que cerró fuera de la caja
 SWEEP = "barrido"               # la vela que tocó el segundo extremo de la caja
+RANGE_END = "fin_rango"         # la vela que terminó el rango vivo a las 02:00
 
 COLUMNS = ("kind", "direction", "reference", "known", "high", "low", "replaced", "until")
 
@@ -109,6 +116,7 @@ def decision_boxes(bars: pd.DataFrame, schedule: DecisionSchedule = NEW_YORK) ->
     first_low = pick("low", low[prior]).astype(float)
     first_reference = pick("reference", prior).astype(int)
     first_direction = pick("direction", np.zeros(len(prior), dtype=int)).astype(int)
+    range_end = pick("end", np.full(len(prior), -1)).astype(int)
 
     day = closes_local[prior].tz_localize(None).normalize()
     window_end = pd.Timedelta(hours=schedule.window_end.hour, minutes=schedule.window_end.minute)
@@ -131,6 +139,13 @@ def decision_boxes(bars: pd.DataFrame, schedule: DecisionSchedule = NEW_YORK) ->
         )
         touched_high = touched_low = False
         for bar in range(before + 1, int(last_in_window[day_number]) + 1):
+            if box[0] == RANGE:
+                if bar != range_end[day_number]:
+                    continue
+                kind = RANGE_END
+                rows.append((*box, True, until[day_number]))
+                box = (kind, 0, bar, bar, float(high[bar]), float(low[bar]))
+                continue
             box_high, box_low = box[4], box[5]
             opens_at_decision = bool(index[bar] == opening[day_number])
             if opens_at_decision and (close[bar] > box_high or close[bar] < box_low):

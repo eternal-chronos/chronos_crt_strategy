@@ -14,6 +14,7 @@ from chronos.domain.crt.decision_box import (
     BREAKOUT,
     PREVIOUS_BAR,
     RANGE,
+    RANGE_END,
     SWEEP,
     decision_boxes,
 )
@@ -86,13 +87,30 @@ def test_la_vela_que_termina_el_rango_no_abre_otro_y_es_ella_la_caja() -> None:
     assert (caja["high"], caja["low"]) == (109.0, 99.0)
 
 
-def test_si_la_vela_de_las_2_cierra_fuera_pasa_a_ser_la_caja() -> None:
+def test_la_vela_que_termina_el_rango_cerrando_fuera_pasa_a_ser_la_caja() -> None:
     cajas = decision_boxes(_h3(*RANGO_BAJISTA, (112.0, 106.0, 111.0)))
-    assert cajas["kind"].tolist() == [RANGE, BREAKOUT]
+    assert cajas["kind"].tolist() == [RANGE, RANGE_END]
     assert cajas["replaced"].tolist() == [True, False]
-    ruptura = cajas.iloc[1]
-    assert (ruptura["reference"], ruptura["known"]) == (3, 3)
-    assert (ruptura["high"], ruptura["low"]) == (112.0, 106.0)
+    fin = cajas.iloc[1]
+    assert (fin["reference"], fin["known"]) == (3, 3)
+    assert (fin["high"], fin["low"]) == (112.0, 106.0)
+
+
+def test_el_rango_se_espera_hasta_la_vela_que_toca_su_objetivo() -> None:
+    # La de las 02:00 y la de las 05:00 no lo terminan; la de las 08:00 toca el
+    # mínimo de la vela 1 y cierra dentro: la caja pasa a ser ella.
+    velas = (*RANGO_BAJISTA, (109.0, 104.0, 106.0), (108.0, 101.0, 102.0), (104.0, 99.5, 101.0))
+    cajas = decision_boxes(_h3(*velas))
+    assert cajas["kind"].tolist() == [RANGE, RANGE_END]
+    assert (cajas.iloc[1]["reference"], cajas.iloc[1]["known"]) == (5, 5)
+    assert (cajas.iloc[1]["high"], cajas.iloc[1]["low"]) == (104.0, 99.5)
+
+
+def test_mientras_vive_el_rango_no_hay_ruptura_ni_barrido() -> None:
+    # Cerrar fuera por arriba termina el bajista por ``cierre_fuera``: no es
+    # ruptura. Y tocar su máximo sin cerrar fuera no lo inhabilita.
+    velas = (*RANGO_BAJISTA, (111.0, 104.0, 108.0), (110.5, 103.0, 107.0))
+    assert decision_boxes(_h3(*velas))["kind"].tolist() == [RANGE]
 
 
 def test_cerrar_fuera_por_abajo_tambien_la_sustituye() -> None:
@@ -204,8 +222,8 @@ def test_la_caja_actual_no_cambia_con_velas_posteriores() -> None:
     low = close - rng.uniform(0.1, 1.5, size)
     velas = _h3(*zip(high, low, close, strict=True))
     completas = decision_boxes(velas)
-    assert set(completas["kind"]) == {RANGE, PREVIOUS_BAR, BREAKOUT, SWEEP}, (
-        "la serie debería dar los cuatro tipos de caja"
+    assert set(completas["kind"]) == {RANGE, PREVIOUS_BAR, BREAKOUT, SWEEP, RANGE_END}, (
+        "la serie debería dar los cinco tipos de caja"
     )
     for posicion in range(size):
         assert _actual(decision_boxes(velas.iloc[: posicion + 1]), posicion) == _actual(

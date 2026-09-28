@@ -3,6 +3,10 @@
 Mientras una vela de H3 está abierta, sus velas de H1 se miran contra la caja
 de las 02:00 vigente al abrir esa vela de H3 (``decision_box.py``):
 
+Contra una caja que es un rango CRT no se busca: se espera a que termine y a la
+caja que deja, la vela de H3 que lo terminó (``fin_rango``), desde la vela de
+H3 siguiente.
+
 1. H1 **toca** un extremo de la caja, con la mecha basta.
 2. Después —o en la misma vela— una vela de H1 hace **turtle soup** en ese lado:
    le saca el extremo a la vela de H1 INMEDIATAMENTE ANTERIOR y cierra de vuelta
@@ -39,7 +43,7 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from chronos.domain.crt.decision_box import NEW_YORK, DecisionSchedule, decision_boxes
+from chronos.domain.crt.decision_box import NEW_YORK, RANGE, DecisionSchedule, decision_boxes
 from chronos.domain.crt.ranges import BEARISH, BULLISH
 
 COLUMNS = ("direction", "bar", "swept", "opposite", "box", "h3_open", "h3_close")
@@ -76,6 +80,8 @@ def confirmation_signals(
     valid = slot >= 0
     safe_slot = np.maximum(slot, 0)
     valid &= h1_index + h1_span <= box_until[safe_slot]
+    # Contra un rango no se busca: se espera a la vela que lo termine.
+    valid &= boxes["kind"].to_numpy()[safe_slot] != RANGE
 
     # La vela de H3 en curso, contada desde el arranque de la caja: dentro de
     # un mismo día no hay cambio de hora, así que la rejilla es regular.

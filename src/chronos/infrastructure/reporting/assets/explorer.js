@@ -353,6 +353,9 @@
     if (box.kind === "vela_previa") {
       return "sin rango vivo antes de las 02:00 NY: la vela anterior, " + stamp(box.ref);
     }
+    if (box.kind === "fin_rango") {
+      return "la vela " + stamp(box.ref) + ", que terminó el rango vivo a las 02:00 NY";
+    }
     if (box.kind === "ruptura") {
       return "la vela de las 02:00 NY, " + stamp(box.ref) + ", que cerró fuera de la caja";
     }

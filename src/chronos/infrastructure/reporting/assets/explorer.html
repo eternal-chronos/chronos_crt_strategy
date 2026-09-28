@@ -273,7 +273,9 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       (calculada por el motor, borde continuo; en H3 y en H1). Un minuto antes de que abra la vela
       de las 02:00 de Nueva York, si hay un rango CRT vivo en H3 la caja es ese rango (naranja
       el bajista, azul el alcista); si no, es la vela anterior aunque no sea un rango (ámbar).
-      Si la vela de las 02:00 cierra fuera de la caja, por arriba o por abajo, al cerrar pasa a
+      Si es un rango, se espera a que termine (toca su objetivo o cierra más allá del otro
+      extremo): al cerrar, la vela que lo termina pasa a ser la caja (ámbar), y contra el rango
+      no se buscan señales. Si la caja es una vela y la de las 02:00 cierra fuera, por arriba o por abajo, al cerrar pasa a
       ser ella la caja (ámbar); si sólo saca la mecha y cierra dentro, es rechazo y la caja se
       mantiene. Después, si el precio toca un extremo de la caja y luego el otro (en la misma
       vela o en otra), la caja queda inhabilitada y al cerrar pasa a ser la vela que tocó el
@@ -291,7 +293,8 @@ la misma ventana, así que la prueba se puede volver a discutir después.">Audit
       que pase fuera de la caja. Triángulo en la vela de la señal, línea continua en el extremo
       barrido de la vela anterior y a trazos en su otro extremo, hasta que cierra la vela de H3.
       Una por vela de H3, que empieza de cero; sólo velas de H1 que cierran a las 12:00 NY o
-      antes. Ocultas en la auditoría ciega hasta Revelar</span>
+      antes. Contra una caja que es un rango no se busca; y una caja barrida deja de valer en la
+      vela de H1 que le toca el segundo extremo. Ocultas en la auditoría ciega hasta Revelar</span>
     <span><i style="background:#6f4bd8"></i><b>Señal de confirmación H4 · buscar entradas</b>
       (calculada por el motor, violeta; sólo en H4). Con la señal de H1 activa —desde el cierre
       de su vela de H1 hasta que cierra su vela de H3, nunca después de las 12:00 NY—, la vela

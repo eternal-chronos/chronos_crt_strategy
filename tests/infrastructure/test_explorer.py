@@ -218,7 +218,7 @@ def test_las_capas_calculadas_del_payload_son_la_caja_y_la_senal(run: ChartRun) 
             assert barrido_abajo == (senal["dir"] == "bullish")
         assert symbol["boxes"], f"{symbol['id']}: la fixture debería dar alguna caja"
         tipos = {caja["kind"] for caja in symbol["boxes"]}
-        assert tipos == {"rango", "vela_previa", "ruptura", "barrido"}, (
+        assert tipos == {"rango", "vela_previa", "ruptura", "barrido", "fin_rango"}, (
             "la fixture debería dar los cuatro tipos"
         )
         for caja in symbol["boxes"]:
@@ -552,7 +552,8 @@ def test_las_cajas_van_rellenas_con_su_color_y_su_origen(drawn: dict) -> None:
             assert texto.startswith("Caja de las 02:00 (calculada)")
             if traza["name"].endswith("vela"):
                 assert any(origen in texto for origen in (
-                    "la vela anterior", "cerró fuera de la caja", "tocó el segundo extremo"
+                    "la vela anterior", "cerró fuera de la caja", "tocó el segundo extremo",
+                    "terminó el rango",
                 ))
             else:
                 assert "vivo antes de las 02:00 NY" in texto

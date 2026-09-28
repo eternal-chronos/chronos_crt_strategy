@@ -126,6 +126,26 @@ def test_la_caja_barrida_muere_en_la_vela_de_h1_que_toca_su_segundo_extremo() ->
     assert barrida.empty
 
 
+#: 13-11-2025: a las 02:00 hay un rango bajista vivo en H3 (vela 1, la de las
+#: 17:00: 110/100; la de las 20:00 le saca el máximo y cierra dentro).
+RANGO_VIVO = ((105.0, 100.0, 104.0), (110.0, 103.0, 108.0), (108.0, 104.0, 105.0),
+              (112.0, 105.0, 110.0), (110.0, 104.0, 106.0), (109.0, 105.0, 106.0),
+              (108.0, 105.0, 107.0), (109.0, 105.5, 107.0), (108.5, 106.0, 107.0))
+
+
+def test_contra_un_rango_no_se_busca_y_se_empieza_tras_la_vela_que_lo_termina() -> None:
+    # La de las 02:00 de H3 toca el máximo del rango y a las 04:00 hace turtle
+    # soup bajista, pero cierra por encima: termina el rango y es la caja nueva.
+    # Esa señal no cuenta; la de las 05:00, contra la caja nueva, sí.
+    velas = (*RANGO_VIVO, (110.5, 106.5, 110.0), (111.5, 109.5, 111.0), (112.0, 110.5, 111.2),
+             (112.5, 111.0, 111.5))
+    h1 = _h1(*velas)
+    assert decision_boxes(_h3(h1))["kind"].tolist() == ["rango", "fin_rango"]
+    senales = confirmation_signals(h1, _h3(h1))
+    assert senales["bar"].tolist() == [12]
+    assert senales.iloc[0]["direction"] == BEARISH
+
+
 def test_la_vela_de_h1_que_cierra_despues_de_las_12_no_cuenta() -> None:
     # De 02:00 a 10:00 NY, quietas; la de las 11:00 cierra a las 12:00 y cuenta,
     # la de las 12:00 cierra a las 13:00 y no.

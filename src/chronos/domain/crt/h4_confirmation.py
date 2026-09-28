@@ -7,8 +7,8 @@ de H4 EN CURSO, armada con las velas de H1 que ya han cerrado:
   ANTERIOR, del mismo lado que la señal de H1: si la de H1 barrió un mínimo, la
   de H4 en curso ya le ha sacado el mínimo a la anterior y el último cierre de
   H1 está de vuelta por encima de él; el espejo si barrió un máximo. Barrer una
-  vela de H4 de dos o más atrás no cuenta, y la que le ha sacado los dos
-  extremos a la anterior es ambigua y no confirma.
+  vela de H4 de dos o más atrás no cuenta. Que le haya sacado también el otro
+  extremo a la anterior da igual: esa ambigüedad es regla de H3, no de H4.
 - se mira al cierre de la vela de H1 de la señal y, si ahí no, en los cierres
   de H1 siguientes mientras la señal siga activa: hasta que cierre su vela de
   H3 y nunca después de las 12:00 NY. Vale el primero.
@@ -71,8 +71,8 @@ def h4_confirmations(
     previous_low = h4["low"].to_numpy(dtype=float)[safe_previous]
     took_high = high_so_far > previous_high
     took_low = low_so_far < previous_low
-    bullish_soup = valid & took_low & ~took_high & (close > previous_low)
-    bearish_soup = valid & took_high & ~took_low & (close < previous_high)
+    bullish_soup = valid & took_low & (close > previous_low)
+    bearish_soup = valid & took_high & (close < previous_high)
 
     # Hasta cuándo sigue activa cada señal: el cierre de su vela de H3, sin
     # pasar de las 12:00 NY.

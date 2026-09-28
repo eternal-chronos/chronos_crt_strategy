@@ -61,8 +61,8 @@ Confirmación en H4 (la señal para buscar entradas): con la señal de H1 activa
 cierra su vela de H3, nunca después de las 12:00 NY—, la vela de H4 **en curso**
 le hace turtle soup a la vela de H4 **inmediatamente anterior** del mismo lado
 que H1: le ha sacado ese extremo y el último cierre de H1 está de vuelta. Vale
-el primer cierre de H1 en que se cumpla. Si la H4 en curso le ha sacado los dos
-extremos a la anterior, no confirma.
+el primer cierre de H1 en que se cumpla. En H1 y en H4, sacarle también el otro
+extremo a la anterior no descarta el turtle soup (esa ambigüedad es sólo de H3).
 
 Entradas: con la confirmación de H4, que se sabe al cierre de una vela de H1, se
 espera a que cierre la vela de 15M en curso y se entra a su cierre, en el

@@ -94,8 +94,14 @@ def test_el_turtle_soup_de_una_vela_de_dos_atras_no_cuenta() -> None:
     assert _signals(*velas).empty
 
 
-def test_la_vela_que_barre_a_la_anterior_por_los_dos_lados_no_da_senal() -> None:
-    assert _signals(*SUBIDA, QUIETA, (104.6, 102.8, 104.0)).empty
+def test_la_vela_que_barre_a_la_anterior_por_los_dos_lados_si_da_senal() -> None:
+    # 03:00 toca el mínimo de la caja, le saca los dos extremos a la de 02:00
+    # y cierra por encima de su mínimo: en H1 barrer los dos lados no descarta.
+    senales = _signals(*SUBIDA, QUIETA, (104.6, 102.8, 104.0))
+    assert len(senales) == 1
+    senal = senales.iloc[0]
+    assert (senal["direction"], senal["bar"]) == (BULLISH, 10)
+    assert (senal["swept"], senal["opposite"]) == (103.5, 104.5)
 
 
 def test_cada_vela_de_h3_empieza_de_cero() -> None:

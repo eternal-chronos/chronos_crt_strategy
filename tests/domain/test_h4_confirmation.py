@@ -65,10 +65,12 @@ def test_sin_turtle_soup_en_h4_no_hay_confirmacion() -> None:
     assert _confirmations(*velas).empty
 
 
-def test_la_h4_que_barre_los_dos_lados_de_la_anterior_no_confirma() -> None:
+def test_la_h4_que_barre_los_dos_lados_de_la_anterior_si_confirma() -> None:
     # 03:00 baja por debajo del mínimo de la H4 anterior (102) y cierra por
-    # debajo de 104,5: la H4 en curso ya le ha sacado los dos extremos.
-    assert _confirmations(*SUBIDA, SENAL, (104.9, 101.9, 104.4)).empty
+    # debajo de 104,5: la H4 en curso le ha sacado los dos extremos y confirma.
+    confirmaciones = _confirmations(*SUBIDA, SENAL, (104.9, 101.9, 104.4))
+    assert confirmaciones["bar"].tolist() == [10]
+    assert (confirmaciones.iloc[0]["swept"], confirmaciones.iloc[0]["opposite"]) == (104.5, 102.0)
 
 
 def test_despues_de_cerrar_la_vela_de_h3_ya_no_confirma() -> None:

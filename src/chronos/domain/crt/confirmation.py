@@ -27,7 +27,8 @@ le toca el segundo extremo, no desde el cierre de H3: desde esa vela (incluida)
 no hay señal contra ella, y el resto de esa vela de H3 no busca nada. Sólo cuentan las velas de H1 que cierran a las 12:00 NY
 o antes, como la caja.
 
-La vela que barre la anterior por los DOS lados es ambigua y no da señal.
+La vela que barre la anterior por los DOS lados también vale: aquí no es
+ambigua (esa regla es de H3), manda el lado de la caja que se tocó.
 
 Agnóstico a par: se compara precio con precio y no hay ni un umbral. Tampoco
 necesita que la vela de H3 en curso esté en la serie de H3: la rejilla de H3 se
@@ -113,8 +114,10 @@ def confirmation_signals(
     prev_low = np.r_[np.nan, low[:-1]]
     took_high = high > prev_high
     took_low = low < prev_low
-    bullish_soup = took_low & ~took_high & (close > prev_low) & touched_low_box
-    bearish_soup = took_high & ~took_low & (close < prev_high) & touched_high_box
+    # Barrer también el otro lado de la anterior no la descarta; si la vela de
+    # H3 tocó los dos extremos de la caja, la caja ya está muerta.
+    bullish_soup = took_low & (close > prev_low) & touched_low_box
+    bearish_soup = took_high & (close < prev_high) & touched_high_box
 
     signal = (bullish_soup | bearish_soup) & alive
     bars = np.flatnonzero(signal)

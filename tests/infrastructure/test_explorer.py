@@ -539,7 +539,13 @@ def test_en_h4_se_dibujan_las_senales_que_se_saben(run: ChartRun, drawn: dict) -
         vistas += len(esperadas)
     assert vistas, "algún paso del recorrido debería enseñar señales en H4"
     todo = _step(drawn, "h4-todo")
-    assert len(_senales_dibujadas(todo)) == len(simbolos[todo["symbol"]]["h4signals"])
+    # Dos señales de H1 de velas de H3 seguidas pueden confirmar en la misma
+    # vela de H4 contra el mismo extremo: se pintan las dos, una encima de otra.
+    distintas = {
+        (s["t"], s["from"], s["until"], s["swept"], s["opposite"])
+        for s in simbolos[todo["symbol"]]["h4signals"]
+    }
+    assert len(_senales_dibujadas(todo)) == len(distintas)
 
 
 def test_las_senales_de_h4_van_en_violeta_y_dicen_que_son_para_buscar_entradas(

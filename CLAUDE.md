@@ -46,7 +46,9 @@ forme rango o no; barrer una de dos o más atrás no vale), se activa la señal:
 anticipa que la vela de H3 cerrará dentro de la caja. Da igual que ocurra fuera
 de la caja. Se marcan el extremo barrido y el otro extremo de la vela anterior.
 Cada vela de H3 empieza de cero, cuenta la primera señal de cada una, y sólo
-las velas de H1 que cierran a las 12:00 NY o antes.
+las velas de H1 que cierran a las 12:00 NY o antes. Una caja barrida muere en
+la vela de H1 que le toca el segundo extremo: desde ella no hay señal, y se
+vuelve a buscar en la vela de H3 siguiente, contra la caja nueva.
 
 Confirmación en H4 (la señal para buscar entradas; las entradas, sin
 programar): con la señal de H1 activa —desde el cierre de su vela hasta que

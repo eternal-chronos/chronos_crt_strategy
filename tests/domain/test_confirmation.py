@@ -113,6 +113,19 @@ def test_solo_cuenta_la_primera_senal_de_cada_vela_de_h3() -> None:
     assert _signals(*doble)["bar"].tolist() == [10]
 
 
+def test_la_caja_barrida_muere_en_la_vela_de_h1_que_toca_su_segundo_extremo() -> None:
+    # La de las 05:00 de H3 sube por encima de la caja y a las 07:00 hace
+    # turtle soup bajista a la de las 06:00. Si la de las 02:00 ya tocó el
+    # mínimo, la de las 05:00 (H1) toca el segundo extremo y mata la caja: el
+    # turtle soup llega después y no cuenta.
+    subida_de_las_05 = ((103.8, 103.2, 103.4), (103.6, 103.3, 103.5), (105.5, 103.4, 105.3),
+                        (105.8, 105.2, 105.6), (106.0, 105.4, 105.5))
+    viva = _signals(*SUBIDA, QUIETA, *subida_de_las_05)
+    barrida = _signals(*SUBIDA, (104.0, 102.9, 103.5), *subida_de_las_05)
+    assert viva["bar"].tolist() == [14]
+    assert barrida.empty
+
+
 def test_la_vela_de_h1_que_cierra_despues_de_las_12_no_cuenta() -> None:
     # De 02:00 a 10:00 NY, quietas; la de las 11:00 cierra a las 12:00 y cuenta,
     # la de las 12:00 cierra a las 13:00 y no.

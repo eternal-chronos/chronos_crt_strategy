@@ -18,7 +18,9 @@ vela anterior: la del turtle soup (el extremo barrido) y la del otro extremo.
 Cada vela de H3 empieza de cero: el toque de una vela de H3 no vale para la
 siguiente, y sólo cuenta la primera señal de cada vela de H3. La caja la cambia
 ``decision_box.py`` al cierre de H3 (ruptura o barrido); la de la vela
-siguiente es la nueva. Sólo cuentan las velas de H1 que cierran a las 12:00 NY
+siguiente es la nueva. Pero una caja barrida está muerta desde la vela de H1 que
+le toca el segundo extremo, no desde el cierre de H3: desde esa vela (incluida)
+no hay señal contra ella, y el resto de esa vela de H3 no busca nada. Sólo cuentan las velas de H1 que cierran a las 12:00 NY
 o antes, como la caja.
 
 La vela que barre la anterior por los DOS lados es ambigua y no da señal.
@@ -94,6 +96,13 @@ def confirmation_signals(
     touched_high_box = (touched_high.to_numpy() >= box_high) & valid
     touched_low_box = (touched_low.to_numpy() <= box_low) & valid
 
+    # La caja muere en la vela de H1 que le toca el segundo extremo, aunque
+    # los toques vengan de velas de H3 distintas.
+    box_group = np.where(valid, safe_slot, -1)
+    seen_high = pd.Series(high).groupby(box_group).cummax().to_numpy()
+    seen_low = pd.Series(low).groupby(box_group).cummin().to_numpy()
+    alive = ~((seen_high >= box_high) & (seen_low <= box_low))
+
     prev_high = np.r_[np.nan, high[:-1]]
     prev_low = np.r_[np.nan, low[:-1]]
     took_high = high > prev_high
@@ -101,7 +110,7 @@ def confirmation_signals(
     bullish_soup = took_low & ~took_high & (close > prev_low) & touched_low_box
     bearish_soup = took_high & ~took_low & (close < prev_high) & touched_high_box
 
-    signal = bullish_soup | bearish_soup
+    signal = (bullish_soup | bearish_soup) & alive
     bars = np.flatnonzero(signal)
     if not len(bars):
         return empty

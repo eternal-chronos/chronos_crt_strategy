@@ -104,8 +104,11 @@ esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
 **Take profit** (con las entradas, cuando se cumplan a la vez H3, H1 y H4): el
 take va en el **objetivo del rango de H3**: siempre es un rango, y el objetivo
 es siempre su lado contrario. Si antes de que el precio llegue a ese
-objetivo nace un rango nuevo, **no se toma**: el take no se mueve y se espera
-sí o sí a que el precio toque el objetivo.
+objetivo nace un rango nuevo (una caja nueva), la operación abierta **no se
+toca**: su take se queda en el objetivo de su rango y se espera sí o sí a que
+el precio lo toque. El rango nuevo sí se marca, y las operaciones que dé sí se
+hacen, cada una con el take en el objetivo de su propio rango. **Máximo 2
+operaciones al día.**
 
 **Completar un rango** = el precio **toca** su extremo objetivo, con la mecha
 basta (bajista: mínimo de la vela 1; alcista: máximo). Con ese toque termina.

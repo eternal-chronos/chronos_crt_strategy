@@ -101,6 +101,12 @@ esto por iniciativa propia**; se programa pieza a pieza cuando se pida.
 - **1H → validación**: comprobar que el rango de 3H es bueno (criterio por definir).
 - **15M → entrada** (criterio por definir).
 
+**Take profit** (con las entradas, cuando se cumplan a la vez H3, H1 y H4): el
+take va en el **objetivo del rango de H3**: siempre es un rango, y el objetivo
+es siempre su lado contrario. Si antes de que el precio llegue a ese
+objetivo nace un rango nuevo, **no se toma**: el take no se mueve y se espera
+sí o sí a que el precio toque el objetivo.
+
 **Completar un rango** = el precio **toca** su extremo objetivo, con la mecha
 basta (bajista: mínimo de la vela 1; alcista: máximo). Con ese toque termina.
 Tocar el extremo contrario y rechazarlo no lo termina; sólo un cierre más allá.
